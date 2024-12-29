@@ -1,5 +1,7 @@
 The MIT License (MIT)
 
+Copyright (c) 2024 saya <saya.38slither@gmail.com>
+
 Copyright (c) 2016 Jesse Miller <jmiller@jmiller.com>
 
 Copyright (c) 2016 Alexey Korepanov <kaikaikai@yandex.ru>
