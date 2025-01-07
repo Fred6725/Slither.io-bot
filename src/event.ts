@@ -1,0 +1,161 @@
+import { bot, zoom } from "./core";
+import {
+	autoRespawnState,
+	botEnabledState,
+	gfxEnabledState,
+	prefVisibleState,
+	radiusMultState,
+	visualizeState,
+} from "./overlay";
+
+const toggleBot = () => {
+	botEnabledState.val = !botEnabledState.val;
+};
+
+const toggleVisualizer = () => {
+	visualizeState.val = !visualizeState.val;
+	bot.visualizeEnabled(visualizeState.val);
+};
+
+const increaseRadiusMult = () => {
+	bot.opt.radiusMult = Math.min(bot.opt.radiusMult + 1, 30);
+	radiusMultState.val = bot.opt.radiusMult;
+};
+
+const decreaseRadiusMult = () => {
+	bot.opt.radiusMult = Math.max(bot.opt.radiusMult - 1, 1);
+	radiusMultState.val = bot.opt.radiusMult;
+};
+
+const initRadiusMult = () => {
+	radiusMultState.val = bot.opt.radiusMult;
+};
+
+const toggleAutoRespawn = () => {
+	autoRespawnState.val = !autoRespawnState.val;
+};
+
+const toggleGfx = () => {
+	gfxEnabledState.val = !gfxEnabledState.val;
+	window.animating = gfxEnabledState.val;
+};
+
+const quickRespawn = () => {
+	if (window.playing) {
+		window.resetGame();
+		window.connect();
+	}
+};
+
+const quitGame = () => {
+	if (window.playing) {
+		window.dead_mtm = 0;
+		window.play_btn.setEnabled(true);
+		window.resetGame();
+	}
+};
+
+const togglePrefVisibility = () => {
+	prefVisibleState.val = !prefVisibleState.val;
+};
+
+const setZoom = (dir: number) => {
+	if (
+		window.slither !== null &&
+		window.playing &&
+		window.connected &&
+		!window.choosing_skin
+	) {
+		zoom.adjust(dir);
+	}
+};
+
+const resetZoom = () => {
+	zoom.set(window.sgsc);
+};
+
+const keyMap: Record<string, () => void> = {
+	t: () => {
+		toggleBot();
+	},
+	y: () => {
+		toggleVisualizer();
+	},
+	a: () => {
+		increaseRadiusMult();
+	},
+	s: () => {
+		decreaseRadiusMult();
+	},
+	i: () => {
+		toggleAutoRespawn();
+	},
+	g: () => {
+		toggleGfx();
+	},
+	escape: () => {
+		quickRespawn();
+	},
+	q: () => {
+		quitGame();
+	},
+	h: () => {
+		togglePrefVisibility();
+	},
+	n: () => {
+		setZoom(-1);
+	},
+	m: () => {
+		setZoom(1);
+	},
+	z: () => {
+		resetZoom();
+	},
+};
+
+export const initEventListeners = () => {
+	// Save the original slither.io event handlers so we can modify them, or reenable them later.
+	const original_onmousedown = window.onmousedown?.bind(window) ?? (() => {});
+	const original_onmousemove = window.onmousemove?.bind(window) ?? (() => {});
+
+	function handleKeydown(e: KeyboardEvent) {
+		const key = e.key.toLowerCase();
+		console.log(key);
+		keyMap[key]?.();
+	}
+
+	function handleMousedown(e: MouseEvent) {
+		if (window.playing) {
+			// left click
+			if (e.button === 0) {
+				bot.defaultAccel = 1;
+				if (!botEnabledState.val) original_onmousedown(e);
+			}
+			// right click
+			else if (e.button === 2) {
+				botEnabledState.val = !botEnabledState.val;
+			}
+		} else {
+			original_onmousedown(e);
+		}
+	}
+
+	function handleMouseup(e: MouseEvent) {
+		bot.defaultAccel = 0;
+	}
+
+	function handleMousemove(e: MouseEvent) {
+		if (!botEnabledState.val) {
+			original_onmousemove(e);
+			return;
+		}
+	}
+
+	document.addEventListener("keydown", handleKeydown);
+	window.onmousedown = handleMousedown;
+	window.onmousemove = handleMousemove;
+	window.addEventListener("mouseup", handleMouseup);
+	window.addEventListener("wheel", (e) => setZoom(Math.sign(e.deltaY)));
+
+	initRadiusMult();
+};
