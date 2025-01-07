@@ -2,11 +2,18 @@
   "name": "slither-bot",
   "module": "index.ts",
   "type": "module",
+  "scripts": {
+    "build": "bun run index.ts"
+  },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "esbuild": "^0.24.2"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "vanjs-core": "^1.5.2"
   }
 }
