@@ -26,21 +26,29 @@ export class GodModeAssist {
 	private visualsEnabled = false;
 	private lastControlTime = 0;
 	private originalMouseControl: ((e: MouseEvent) => void) | null = null;
+	
+	// Boost state tracking
+	private playerWasBoosting = false;
+	private boostInterrupted = false;
+	private lastBoostCheck = 0;
 
 	public opt = {
-		// Detection settings - tuned for real physics
+		// Detection settings - boost-aware
 		predictionFrames: 60,           // 1 second lookahead at 60fps
-		dangerRadius: 80,               // Reasonable detection radius
+		baseDangerRadius: 80,           // Base detection radius
 		emergencyRadius: 40,            // Emergency response distance
+		boostMultiplier: 3.5,           // Detection distance multiplier when boosting
+		dualBoostMultiplier: 7.0,       // When both snakes boost
 		
-		// Response settings - precise control
-		maxThreatLevel: 0.4,           // Activate when 40% threat or higher
-		controlCooldown: 15,           // Prevent rapid takeovers
-		minControlDuration: 10,        // Hold control long enough to complete maneuver
+		// Response settings - more aggressive
+		maxThreatLevel: 0.3,           // Activate sooner (30% threat)
+		controlCooldown: 8,            // Faster response
+		minControlDuration: 15,        // Hold control longer for full maneuver
 		
 		// Physics settings
-		speedBoostThreshold: 0.8,      // Boost when 80% threat or higher
-		tightSpaceThreshold: 80,       // Distance threshold for tight space detection
+		speedBoostThreshold: 0.6,      // Boost more often
+		boostTurnMultiplier: 0.4,      // Much sharper turns when boosting (40% vs 60%)
+		normalTurnMultiplier: 0.8,     // Slightly sharper normal turns too
 	};
 
 	public isEnabled(): boolean {
@@ -96,7 +104,23 @@ export class GodModeAssist {
 	}
 
 	/**
-	 * Get collision points using the bot's proven method
+	 * Calculate boost-aware detection radius
+	 */
+	private getDetectionRadius(ourSnake: ISlither, targetSnake?: ISlither): number {
+		const ourBoosting = ourSnake.sp > 6;
+		let multiplier = 1;
+		
+		if (ourBoosting) {
+			// Check if target is also boosting
+			const targetBoosting = targetSnake && targetSnake.sp > 6;
+			multiplier = targetBoosting ? this.opt.dualBoostMultiplier : this.opt.boostMultiplier;
+		}
+		
+		return this.opt.baseDangerRadius * multiplier;
+	}
+
+	/**
+	 * Get collision points using boost-aware detection
 	 */
 	private getCollisionPointsLikeBoot(ourSnake: ISlither): Array<{
 		x: number;
@@ -117,21 +141,21 @@ export class GodModeAssist {
 			speed?: number;
 		}> = [];
 
-		// Use bot's width calculation
-		const ourWidth = Math.round(ourSnake.sc * 29);
-		const farCollisionD2 = (ourWidth * 50) ** 2;
-
 		for (let i = 0; i < window.slithers.length; i++) {
 			if (window.slithers[i].id === ourSnake.id) continue;
 
 			const s = window.slithers[i];
 			if (!s || s.dead) continue;
 
+			// Calculate boost-aware detection radius for this snake
+			const detectionRadius = this.getDetectionRadius(ourSnake, s);
+			const detectionRadius2 = detectionRadius * detectionRadius;
+
 			const sRadius = Math.round(s.sc * 29) / 2;
 
 			// Add head collision point
 			const headD2 = getDistance2(ourSnake.xx, ourSnake.yy, s.xx, s.yy);
-			if (headD2 < this.opt.dangerRadius * this.opt.dangerRadius * 4) { // Wider detection
+			if (headD2 < detectionRadius2) {
 				collisionPoints.push({
 					x: s.xx,
 					y: s.yy,
@@ -152,8 +176,8 @@ export class GodModeAssist {
 
 					const pd2 = getDistance2(ourSnake.xx, ourSnake.yy, po.xx, po.yy);
 					
-					// Use wider detection radius for body segments
-					if (pd2 < this.opt.dangerRadius * this.opt.dangerRadius * 4) {
+					// Use same boost-aware radius for body segments
+					if (pd2 < detectionRadius2) {
 						collisionPoints.push({
 							x: po.xx,
 							y: po.yy,
@@ -275,7 +299,7 @@ export class GodModeAssist {
 	}
 
 	/**
-	 * Calculates smart avoidance angle based on approach angle and boost state
+	 * Calculates aggressive avoidance angle - always turn fully to survive
 	 */
 	private calculateSmartAvoidanceAngle(
 		ourSnake: ISlither,
@@ -286,36 +310,41 @@ export class GodModeAssist {
 		const ourAngle = ourSnake.ang;
 		const ourSpeed = ourSnake.sp;
 		
-		// Determine if we're boosting (affects turning capability)
+		// Determine boost state and turning capability
 		const isBoosting = ourSpeed > 6;
-		const boostMultiplier = isBoosting ? 0.6 : 1.0; // Less agile when boosting
+		const baseMultiplier = isBoosting ? this.opt.boostTurnMultiplier : this.opt.normalTurnMultiplier;
 		
-		// Calculate correction based on approach angle
+		// Always turn aggressively - goal is to survive, not be subtle
 		let correctionMagnitude: number;
 		
-		if (approachAngle > Math.PI * 0.7) {
-			// 90° approach - sharp turn needed
-			correctionMagnitude = Math.PI * 0.5; // 90° turn
-		} else if (approachAngle > Math.PI * 0.4) {
-			// Medium angle - moderate turn
-			correctionMagnitude = Math.PI * 0.3; // 54° turn
+		if (approachAngle > Math.PI * 0.6) {
+			// Near head-on - FULL turn required
+			correctionMagnitude = Math.PI * 0.7; // 126° turn - almost U-turn
+		} else if (approachAngle > Math.PI * 0.3) {
+			// Medium angle - strong turn
+			correctionMagnitude = Math.PI * 0.55; // 99° turn
 		} else {
-			// Shallow angle - gentle correction
-			correctionMagnitude = Math.PI * 0.15; // 27° turn
+			// Shallow angle - still significant turn to get parallel
+			correctionMagnitude = Math.PI * 0.4; // 72° turn
 		}
 		
-		// Apply boost limitation and urgency scaling
-		correctionMagnitude *= boostMultiplier * (0.7 + threatLevel * 0.3);
+		// Scale by urgency and boost state
+		correctionMagnitude *= baseMultiplier * (0.8 + threatLevel * 0.2);
 		
-		// Determine turn direction based on which side of target we're on
+		// For very high threats, turn even more aggressively
+		if (threatLevel > 0.7) {
+			correctionMagnitude *= 1.2; // 20% more aggressive
+		}
+		
+		// Determine optimal turn direction
 		const targetAngle = Math.atan2(targetPoint.y - ourSnake.yy, targetPoint.x - ourSnake.xx);
 		const angleDiff = ourAngle - targetAngle;
 		const normalizedDiff = ((angleDiff + Math.PI) % (2 * Math.PI)) - Math.PI;
 		
-		// Turn away from target
+		// Turn away from target (always take the larger turn for safety)
 		const turnDirection = normalizedDiff > 0 ? 1 : -1;
 		
-		// Calculate final angle
+		// Calculate final angle - ensure we turn enough to run parallel
 		return ourAngle + turnDirection * correctionMagnitude;
 	}
 
@@ -439,21 +468,44 @@ export class GodModeAssist {
 	}
 
 	/**
-	 * Takes control of the snake to avoid collision - ONE PRECISE CORRECTION
+	 * Check if player is currently boosting (via input detection)
+	 */
+	private isPlayerBoosting(): boolean {
+		// Check if the game shows acceleration (boost) active
+		// This is set by the game when left mouse or space is held
+		return window.setAcceleration && ourSnake && ourSnake.sp > 6;
+	}
+
+	/**
+	 * Takes control of the snake to avoid collision - AGGRESSIVE SURVIVAL
 	 */
 	private takeControl(ourSnake: ISlither, threat: ThreatAnalysis): void {
 		this.state.emergencyAvoidanceActive = true;
 		this.lastControlTime = window.timeObj ? window.timeObj.now() : Date.now();
 
-		console.log(`🚨 GOD MODE TAKEOVER! Threat: ${(threat.threatLevel * 100).toFixed(0)}%, Time: ${threat.timeToCollision.toFixed(1)} frames`);
+		// Track if player was boosting before we took control
+		this.playerWasBoosting = ourSnake.sp > 6;
+		this.boostInterrupted = false;
 
-		// Apply ONE precise correction to avoidance angle
+		console.log(`🚨 GOD MODE TAKEOVER! Threat: ${(threat.threatLevel * 100).toFixed(0)}%, Time: ${threat.timeToCollision.toFixed(1)} frames, Boost: ${this.playerWasBoosting}`);
+
+		// Apply aggressive correction to avoidance angle
 		this.setMouseDirection(threat.avoidanceAngle);
 
-		// Boost speed if threat is very close
-		if (threat.threatLevel > this.opt.speedBoostThreshold) {
+		// Smart boost logic based on threat level and approach angle
+		if (threat.threatLevel > 0.8) {
+			// Very high threat - stop boosting to turn sharper
+			window.setAcceleration(0);
+			this.boostInterrupted = true;
+			console.log(`🛑 BOOST STOPPED for sharp turn`);
+		} else if (threat.threatLevel > this.opt.speedBoostThreshold) {
+			// Medium threat - boost to escape faster
 			window.setAcceleration(1);
-			console.log(`⚡ BOOST ACTIVATED`);
+			console.log(`⚡ BOOST ACTIVATED for escape`);
+		} else if (this.playerWasBoosting) {
+			// Low threat but player was boosting - maintain boost
+			window.setAcceleration(1);
+			console.log(`⚡ BOOST MAINTAINED`);
 		}
 	}
 
@@ -466,12 +518,25 @@ export class GodModeAssist {
 	}
 
 	/**
-	 * Releases control back to the player
+	 * Releases control back to the player with smart boost resumption
 	 */
 	private releaseControl(): void {
 		this.state.emergencyAvoidanceActive = false;
-		window.setAcceleration(0);
-		console.log(`✅ GOD MODE RELEASED - Control returned to player`);
+		
+		// Smart boost resumption logic
+		if (this.boostInterrupted && this.playerWasBoosting) {
+			// Player was boosting and we stopped it - resume boost
+			window.setAcceleration(1);
+			console.log(`✅ GOD MODE RELEASED - Boost resumed`);
+		} else {
+			// Normal release - stop any system-initiated boost
+			window.setAcceleration(0);
+			console.log(`✅ GOD MODE RELEASED - Control returned to player`);
+		}
+		
+		// Reset boost tracking
+		this.playerWasBoosting = false;
+		this.boostInterrupted = false;
 	}
 
 
@@ -510,7 +575,8 @@ export class GodModeAssist {
 		});
 
 		const snakeScreen = mapToCanvas({ x: ourSnake.xx, y: ourSnake.yy });
-		const scaledDangerRadius = this.opt.dangerRadius * window.gsc;
+		const currentDangerRadius = this.getDetectionRadius(ourSnake);
+		const scaledDangerRadius = currentDangerRadius * window.gsc;
 		const scaledEmergencyRadius = this.opt.emergencyRadius * window.gsc;
 
 		// Draw danger radius (larger and more visible)
@@ -576,6 +642,11 @@ export class GodModeAssist {
 		const stateText = this.state.emergencyAvoidanceActive ? 'EMERGENCY ACTIVE!' : 'Monitoring...';
 		ctx.fillText(stateText, 10, 90);
 		
+		// Show boost state and detection info
+		const isBoosting = ourSnake.sp > 6;
+		const detectionRadius = this.getDetectionRadius(ourSnake);
+		ctx.fillText(`Boost: ${isBoosting ? 'ON' : 'OFF'} | Detection: ${detectionRadius.toFixed(0)}px`, 10, 110);
+		
 		// Show nearby snakes count
 		let nearbyCount = 0;
 		if (window.slithers && ourSnake) {
@@ -583,23 +654,23 @@ export class GodModeAssist {
 				const snake = window.slithers[i];
 				if (!snake || snake.id === ourSnake.id || snake.dead) continue;
 				const distance = Math.sqrt(getDistance2(ourSnake.xx, ourSnake.yy, snake.xx, snake.yy));
-				if (distance < this.opt.dangerRadius * 3) nearbyCount++;
+				if (distance < detectionRadius) nearbyCount++;
 			}
 		}
-		ctx.fillText(`Nearby Snakes: ${nearbyCount}`, 10, 110);
+		ctx.fillText(`Nearby Snakes: ${nearbyCount}`, 10, 130);
 		
 		// Show threat count and max threat level
-		ctx.fillText(`Threats: ${this.state.threatAnalyses.length}`, 10, 130);
+		ctx.fillText(`Threats: ${this.state.threatAnalyses.length}`, 10, 150);
 		if (this.state.threatAnalyses.length > 0) {
 			const maxThreat = this.state.threatAnalyses[0];
-			ctx.fillText(`Max Threat: ${(maxThreat.threatLevel * 100).toFixed(0)}%`, 10, 150);
-			ctx.fillText(`Time to Collision: ${maxThreat.timeToCollision.toFixed(1)}f`, 10, 170);
+			ctx.fillText(`Max Threat: ${(maxThreat.threatLevel * 100).toFixed(0)}%`, 10, 170);
+			ctx.fillText(`Time to Collision: ${maxThreat.timeToCollision.toFixed(1)}f`, 10, 190);
 		}
 
 		// Debug: Show collision points found
 		if (window.slithers && ourSnake) {
 			const collisionPoints = this.getCollisionPointsLikeBoot(ourSnake);
-			ctx.fillText(`Collision Points: ${collisionPoints.length}`, 10, 190);
+			ctx.fillText(`Collision Points: ${collisionPoints.length}`, 10, 210);
 			
 			// Draw collision points
 			for (const cp of collisionPoints.slice(0, 5)) { // Show first 5
