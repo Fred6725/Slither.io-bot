@@ -12,3 +12,8 @@ bot.onSetCoordinates = (x, y) => {
 bot.onAcceleration = (accel) => {
 	window.setAcceleration(accel);
 };
+
+// God Mode Assist - independent of bot
+export const checkGodModeAssist = () => {
+	return bot.checkGodModeAssist();
+};

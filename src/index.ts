@@ -1,4 +1,4 @@
-import { bot, zoom } from "./core";
+import { bot, zoom, checkGodModeAssist } from "./core";
 import { initEventListeners } from "./event";
 import {
 	autoRespawnState,
@@ -27,6 +27,12 @@ const init = () => {
 
 		original_oef();
 
+		// God Mode Assist - works independently of bot
+		if (window.playing && window.slither !== null) {
+			checkGodModeAssist();
+		}
+
+		// Bot behavior
 		if (window.playing && botEnabledState.val && window.slither !== null) {
 			isBotRunning = true;
 			bot.go();

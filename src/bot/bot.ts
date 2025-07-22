@@ -24,10 +24,10 @@ import type {
 	PolyBox,
 } from "./types";
 import { Visualizer } from "./visualizer";
-import { GodMode } from "./god-mode";
+import { GodModeAssist } from "./god-mode";
 
 const visualizer = new Visualizer();
-const godMode = new GodMode();
+const godModeAssist = new GodModeAssist();
 
 export class Bot {
 	stage = "grow";
@@ -103,15 +103,31 @@ export class Bot {
 	}
 
 	public godModeEnabled(enabled: boolean): void {
-		godMode.setEnabled(enabled);
+		godModeAssist.setEnabled(enabled);
+	}
+
+	public godModeVisualsEnabled(enabled: boolean): void {
+		godModeAssist.setVisualsEnabled(enabled);
 	}
 
 	public isGodModeEnabled(): boolean {
-		return godMode.isEnabled();
+		return godModeAssist.isEnabled();
+	}
+
+	public isGodModeVisualsEnabled(): boolean {
+		return godModeAssist.isVisualsEnabled();
 	}
 
 	public getGodModeStats() {
-		return godMode.getStats();
+		return godModeAssist.getStats();
+	}
+
+	/**
+	 * Checks if god mode assist should take control (independent of bot)
+	 */
+	public checkGodModeAssist(): boolean {
+		if (!window.slither || !window.playing) return false;
+		return godModeAssist.checkAndAssist(window.slither);
 	}
 
 	public getSnakeLength(sk: ISlither): number {
@@ -1346,43 +1362,7 @@ export class Bot {
 
 		this.every();
 
-		// GOD MODE: Check for emergency situations first
-		if (godMode.isEnabled() && window.slither) {
-			const analysis = godMode.analyzeThreats(window.slither);
-			
-			if (analysis.emergencyAvoidance) {
-				// EMERGENCY: Override all other behavior
-				const emergencyTarget = godMode.getEmergencyAvoidanceTarget(window.slither);
-				if (emergencyTarget) {
-					this.#goalCoordinates = emergencyTarget;
-					this.onAcceleration(1); // Full speed to escape
-					this.onSetCoordinates(this.#goalCoordinates.x, this.#goalCoordinates.y);
-					
-					// Draw emergency indicator
-					visualizer.drawCircle(
-						{
-							x: this.#x,
-							y: this.#y,
-							r: 100,
-						},
-						"red",
-						true,
-						0.3,
-					);
-					visualizer.drawLine(
-						{
-							x: this.#x,
-							y: this.#y,
-						},
-						this.#goalCoordinates,
-						"red",
-					);
-					return; // Skip normal behavior
-				}
-			}
-		}
-
-		// Normal bot behavior continues
+		// Normal bot behavior
 		if (this.#snakeLength < this.opt.followCircleLength) {
 			this.stage = "grow";
 		}
@@ -1430,22 +1410,9 @@ export class Bot {
 			"red",
 		);
 
-		// GOD MODE: Draw threat visualizations
-		if (godMode.isEnabled()) {
-			const stats = godMode.getStats();
-			if (stats.threatCount > 0) {
-				// Draw threat count indicator
-				visualizer.drawCircle(
-					{
-						x: this.#x,
-						y: this.#y - 80,
-						r: 20,
-					},
-					"orange",
-					true,
-					0.5,
-				);
-			}
+		// Draw god mode visuals if enabled
+		if (godModeAssist.isVisualsEnabled() && window.slither) {
+			godModeAssist.drawVisuals(ctx, window.slither);
 		}
 	}
 
