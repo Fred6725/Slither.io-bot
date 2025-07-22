@@ -28,19 +28,19 @@ export class GodModeAssist {
 	private originalMouseControl: ((e: MouseEvent) => void) | null = null;
 
 	public opt = {
-		// Detection settings
+		// Detection settings - made more sensitive for testing
 		predictionFrames: 20,           // Frames to look ahead
-		dangerRadius: 60,               // Minimum safe distance
-		emergencyRadius: 35,            // Critical distance requiring immediate action
+		dangerRadius: 120,              // Increased for easier testing
+		emergencyRadius: 70,            // Increased for easier testing
 		
-		// Response settings
-		maxThreatLevel: 0.6,           // Lower threshold for faster response
-		controlCooldown: 10,           // Frames between control takeovers
-		minControlDuration: 5,         // Minimum frames to hold control
+		// Response settings - made more responsive
+		maxThreatLevel: 0.3,           // Lower threshold for testing
+		controlCooldown: 5,            // Reduced cooldown for testing
+		minControlDuration: 3,         // Reduced minimum control time
 		
 		// Precision settings
-		angleAdjustmentPrecision: 0.1, // How precise angle corrections are
-		speedBoostThreshold: 0.8,      // When to boost speed during escape
+		angleAdjustmentPrecision: 0.15, // Slightly more aggressive for visibility
+		speedBoostThreshold: 0.7,      // Lower threshold for speed boost
 		tightSpaceThreshold: 80,       // Distance threshold for tight space detection
 	};
 
@@ -50,6 +50,7 @@ export class GodModeAssist {
 
 	public setEnabled(enabled: boolean): void {
 		this.state.enabled = enabled;
+		console.log(`God Mode Assist: ${enabled ? 'ENABLED' : 'DISABLED'}`);
 		if (!enabled) {
 			this.state.emergencyAvoidanceActive = false;
 			this.state.threatAnalyses = [];
@@ -60,6 +61,7 @@ export class GodModeAssist {
 
 	public setVisualsEnabled(enabled: boolean): void {
 		this.visualsEnabled = enabled;
+		console.log(`God Mode Visuals: ${enabled ? 'ENABLED' : 'DISABLED'}`);
 	}
 
 	public isVisualsEnabled(): boolean {
@@ -389,18 +391,26 @@ export class GodModeAssist {
 	public drawVisuals(ctx: CanvasRenderingContext2D, ourSnake: ISlither): void {
 		if (!this.visualsEnabled || !ourSnake) return;
 
-		// Draw danger radius
+		// Always draw status indicator to show visuals are working
+		ctx.fillStyle = this.state.enabled ? 'rgba(0, 255, 0, 0.8)' : 'rgba(255, 0, 0, 0.8)';
+		ctx.font = '16px Arial';
+		const status = this.state.enabled ? 'GOD MODE: ON' : 'GOD MODE: OFF';
+		ctx.fillText(status, 10, 70);
+
+		if (!this.state.enabled) return;
+
+		// Draw danger radius (larger and more visible)
 		ctx.beginPath();
 		ctx.arc(ourSnake.xx - window.view_xx, ourSnake.yy - window.view_yy, this.opt.dangerRadius, 0, 2 * Math.PI);
-		ctx.strokeStyle = this.state.emergencyAvoidanceActive ? 'rgba(255, 0, 0, 0.5)' : 'rgba(255, 255, 0, 0.3)';
-		ctx.lineWidth = 2;
+		ctx.strokeStyle = this.state.emergencyAvoidanceActive ? 'rgba(255, 0, 0, 0.8)' : 'rgba(255, 255, 0, 0.6)';
+		ctx.lineWidth = 3;
 		ctx.stroke();
 
 		// Draw emergency radius
 		ctx.beginPath();
 		ctx.arc(ourSnake.xx - window.view_xx, ourSnake.yy - window.view_yy, this.opt.emergencyRadius, 0, 2 * Math.PI);
-		ctx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
-		ctx.lineWidth = 1;
+		ctx.strokeStyle = 'rgba(255, 0, 0, 0.9)';
+		ctx.lineWidth = 2;
 		ctx.stroke();
 
 		// Draw threats
@@ -431,15 +441,31 @@ export class GodModeAssist {
 			}
 		}
 
-		// Draw status text
-		ctx.fillStyle = this.state.emergencyAvoidanceActive ? 'rgba(255, 0, 0, 1)' : 'rgba(255, 255, 255, 0.8)';
+		// Draw detailed debug information
+		ctx.fillStyle = this.state.emergencyAvoidanceActive ? 'rgba(255, 0, 0, 1)' : 'rgba(255, 255, 255, 0.9)';
 		ctx.font = '14px Arial';
-		const status = this.state.emergencyAvoidanceActive ? 'GOD MODE ACTIVE' : 'God Mode Ready';
-		ctx.fillText(status, 10, 30);
 		
+		// Show current state
+		const stateText = this.state.emergencyAvoidanceActive ? 'EMERGENCY ACTIVE!' : 'Monitoring...';
+		ctx.fillText(stateText, 10, 90);
+		
+		// Show nearby snakes count
+		let nearbyCount = 0;
+		if (window.slithers && ourSnake) {
+			for (let i = 0; i < window.slithers.length; i++) {
+				const snake = window.slithers[i];
+				if (!snake || snake.id === ourSnake.id || snake.dead) continue;
+				const distance = Math.sqrt(getDistance2(ourSnake.xx, ourSnake.yy, snake.xx, snake.yy));
+				if (distance < this.opt.dangerRadius * 3) nearbyCount++;
+			}
+		}
+		ctx.fillText(`Nearby Snakes: ${nearbyCount}`, 10, 110);
+		
+		// Show threat count and max threat level
+		ctx.fillText(`Threats: ${this.state.threatAnalyses.length}`, 10, 130);
 		if (this.state.threatAnalyses.length > 0) {
 			const maxThreat = this.state.threatAnalyses[0];
-			ctx.fillText(`Threat Level: ${(maxThreat.threatLevel * 100).toFixed(0)}%`, 10, 50);
+			ctx.fillText(`Max Threat: ${(maxThreat.threatLevel * 100).toFixed(0)}%`, 10, 150);
 		}
 	}
 

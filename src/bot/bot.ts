@@ -130,6 +130,13 @@ export class Bot {
 		return godModeAssist.checkAndAssist(window.slither);
 	}
 
+	/**
+	 * Draws god mode visuals independently
+	 */
+	public drawGodModeVisuals(ctx: CanvasRenderingContext2D, ourSnake: ISlither): void {
+		godModeAssist.drawVisuals(ctx, ourSnake);
+	}
+
 	public getSnakeLength(sk: ISlither): number {
 		if (null == sk || 0 > sk.sct || 0 > sk.fam || 0 > sk.rsc) {
 			return 0;
@@ -1410,10 +1417,7 @@ export class Bot {
 			"red",
 		);
 
-		// Draw god mode visuals if enabled
-		if (godModeAssist.isVisualsEnabled() && window.slither) {
-			godModeAssist.drawVisuals(ctx, window.slither);
-		}
+
 	}
 
 	public destory() {

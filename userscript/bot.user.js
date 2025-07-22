@@ -229,25 +229,25 @@ The MIT License (MIT)
     lastControlTime = 0;
     originalMouseControl = null;
     opt = {
-      // Detection settings
+      // Detection settings - made more sensitive for testing
       predictionFrames: 20,
       // Frames to look ahead
-      dangerRadius: 60,
-      // Minimum safe distance
-      emergencyRadius: 35,
-      // Critical distance requiring immediate action
-      // Response settings
-      maxThreatLevel: 0.6,
-      // Lower threshold for faster response
-      controlCooldown: 10,
-      // Frames between control takeovers
-      minControlDuration: 5,
-      // Minimum frames to hold control
+      dangerRadius: 120,
+      // Increased for easier testing
+      emergencyRadius: 70,
+      // Increased for easier testing
+      // Response settings - made more responsive
+      maxThreatLevel: 0.3,
+      // Lower threshold for testing
+      controlCooldown: 5,
+      // Reduced cooldown for testing
+      minControlDuration: 3,
+      // Reduced minimum control time
       // Precision settings
-      angleAdjustmentPrecision: 0.1,
-      // How precise angle corrections are
-      speedBoostThreshold: 0.8,
-      // When to boost speed during escape
+      angleAdjustmentPrecision: 0.15,
+      // Slightly more aggressive for visibility
+      speedBoostThreshold: 0.7,
+      // Lower threshold for speed boost
       tightSpaceThreshold: 80
       // Distance threshold for tight space detection
     };
@@ -256,6 +256,7 @@ The MIT License (MIT)
     }
     setEnabled(enabled) {
       this.state.enabled = enabled;
+      console.log(`God Mode Assist: ${enabled ? "ENABLED" : "DISABLED"}`);
       if (!enabled) {
         this.state.emergencyAvoidanceActive = false;
         this.state.threatAnalyses = [];
@@ -265,6 +266,7 @@ The MIT License (MIT)
     }
     setVisualsEnabled(enabled) {
       this.visualsEnabled = enabled;
+      console.log(`God Mode Visuals: ${enabled ? "ENABLED" : "DISABLED"}`);
     }
     isVisualsEnabled() {
       return this.visualsEnabled;
@@ -506,15 +508,20 @@ The MIT License (MIT)
      */
     drawVisuals(ctx, ourSnake) {
       if (!this.visualsEnabled || !ourSnake) return;
+      ctx.fillStyle = this.state.enabled ? "rgba(0, 255, 0, 0.8)" : "rgba(255, 0, 0, 0.8)";
+      ctx.font = "16px Arial";
+      const status = this.state.enabled ? "GOD MODE: ON" : "GOD MODE: OFF";
+      ctx.fillText(status, 10, 70);
+      if (!this.state.enabled) return;
       ctx.beginPath();
       ctx.arc(ourSnake.xx - window.view_xx, ourSnake.yy - window.view_yy, this.opt.dangerRadius, 0, 2 * Math.PI);
-      ctx.strokeStyle = this.state.emergencyAvoidanceActive ? "rgba(255, 0, 0, 0.5)" : "rgba(255, 255, 0, 0.3)";
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = this.state.emergencyAvoidanceActive ? "rgba(255, 0, 0, 0.8)" : "rgba(255, 255, 0, 0.6)";
+      ctx.lineWidth = 3;
       ctx.stroke();
       ctx.beginPath();
       ctx.arc(ourSnake.xx - window.view_xx, ourSnake.yy - window.view_yy, this.opt.emergencyRadius, 0, 2 * Math.PI);
-      ctx.strokeStyle = "rgba(255, 0, 0, 0.7)";
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(255, 0, 0, 0.9)";
+      ctx.lineWidth = 2;
       ctx.stroke();
       for (const threat of this.state.threatAnalyses) {
         if (threat.threatLevel > 0.3) {
@@ -537,13 +544,24 @@ The MIT License (MIT)
           }
         }
       }
-      ctx.fillStyle = this.state.emergencyAvoidanceActive ? "rgba(255, 0, 0, 1)" : "rgba(255, 255, 255, 0.8)";
+      ctx.fillStyle = this.state.emergencyAvoidanceActive ? "rgba(255, 0, 0, 1)" : "rgba(255, 255, 255, 0.9)";
       ctx.font = "14px Arial";
-      const status = this.state.emergencyAvoidanceActive ? "GOD MODE ACTIVE" : "God Mode Ready";
-      ctx.fillText(status, 10, 30);
+      const stateText = this.state.emergencyAvoidanceActive ? "EMERGENCY ACTIVE!" : "Monitoring...";
+      ctx.fillText(stateText, 10, 90);
+      let nearbyCount = 0;
+      if (window.slithers && ourSnake) {
+        for (let i = 0; i < window.slithers.length; i++) {
+          const snake = window.slithers[i];
+          if (!snake || snake.id === ourSnake.id || snake.dead) continue;
+          const distance = Math.sqrt(getDistance2(ourSnake.xx, ourSnake.yy, snake.xx, snake.yy));
+          if (distance < this.opt.dangerRadius * 3) nearbyCount++;
+        }
+      }
+      ctx.fillText(`Nearby Snakes: ${nearbyCount}`, 10, 110);
+      ctx.fillText(`Threats: ${this.state.threatAnalyses.length}`, 10, 130);
       if (this.state.threatAnalyses.length > 0) {
         const maxThreat = this.state.threatAnalyses[0];
-        ctx.fillText(`Threat Level: ${(maxThreat.threatLevel * 100).toFixed(0)}%`, 10, 50);
+        ctx.fillText(`Max Threat: ${(maxThreat.threatLevel * 100).toFixed(0)}%`, 10, 150);
       }
     }
     getStats() {
@@ -647,6 +665,12 @@ The MIT License (MIT)
     checkGodModeAssist() {
       if (!window.slither || !window.playing) return false;
       return godModeAssist.checkAndAssist(window.slither);
+    }
+    /**
+     * Draws god mode visuals independently
+     */
+    drawGodModeVisuals(ctx, ourSnake) {
+      godModeAssist.drawVisuals(ctx, ourSnake);
     }
     getSnakeLength(sk) {
       if (null == sk || 0 > sk.sct || 0 > sk.fam || 0 > sk.rsc) {
@@ -1621,9 +1645,6 @@ The MIT License (MIT)
         },
         "red"
       );
-      if (godModeAssist.isVisualsEnabled() && window.slither) {
-        godModeAssist.drawVisuals(ctx, window.slither);
-      }
     }
     destory() {
       this.#delayFrame = 0;
@@ -2100,6 +2121,10 @@ The MIT License (MIT)
       original_oef();
       if (window.playing && window.slither !== null) {
         checkGodModeAssist();
+        const ctx = window.mc?.getContext("2d");
+        if (ctx && bot.isGodModeVisualsEnabled()) {
+          bot.drawGodModeVisuals(ctx, window.slither);
+        }
       }
       if (window.playing && botEnabledState.val && window.slither !== null) {
         isBotRunning = true;
