@@ -81,3 +81,42 @@ export interface FoodAngle extends Point {
 export interface BodyPoint extends Point {
 	len: number;
 }
+
+// NEW: Enhanced prediction types for god mode
+export interface TrajectoryPoint extends Point {
+	time: number;
+	angle: number;
+	speed: number;
+}
+
+export interface SnakeTrajectory {
+	snakeId: number;
+	trajectory: TrajectoryPoint[];
+	predictedCollisionTime?: number;
+	collisionPoint?: Point;
+}
+
+export interface ThreatAnalysis {
+	snakeId: number;
+	threatLevel: number; // 0-1 scale
+	timeToCollision: number; // frames until collision
+	avoidanceAngle: number; // optimal angle to avoid
+	priority: number; // processing priority
+}
+
+export interface KillOpportunity {
+	targetSnakeId: number;
+	interceptPoint: Point;
+	interceptTime: number;
+	successProbability: number;
+	requiredTrajectory: TrajectoryPoint[];
+}
+
+export interface GodModeState {
+	enabled: boolean;
+	collisionPredictionFrames: number;
+	emergencyAvoidanceActive: boolean;
+	lastEmergencyTime: number;
+	threatAnalyses: ThreatAnalysis[];
+	killOpportunities: KillOpportunity[];
+}

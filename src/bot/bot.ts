@@ -24,8 +24,10 @@ import type {
 	PolyBox,
 } from "./types";
 import { Visualizer } from "./visualizer";
+import { GodMode } from "./god-mode";
 
 const visualizer = new Visualizer();
+const godMode = new GodMode();
 
 export class Bot {
 	stage = "grow";
@@ -98,6 +100,18 @@ export class Bot {
 
 	public visualizeEnabled(enabled: boolean): void {
 		visualizer.enabled = enabled;
+	}
+
+	public godModeEnabled(enabled: boolean): void {
+		godMode.setEnabled(enabled);
+	}
+
+	public isGodModeEnabled(): boolean {
+		return godMode.isEnabled();
+	}
+
+	public getGodModeStats() {
+		return godMode.getStats();
 	}
 
 	public getSnakeLength(sk: ISlither): number {
@@ -1332,6 +1346,43 @@ export class Bot {
 
 		this.every();
 
+		// GOD MODE: Check for emergency situations first
+		if (godMode.isEnabled() && window.slither) {
+			const analysis = godMode.analyzeThreats(window.slither);
+			
+			if (analysis.emergencyAvoidance) {
+				// EMERGENCY: Override all other behavior
+				const emergencyTarget = godMode.getEmergencyAvoidanceTarget(window.slither);
+				if (emergencyTarget) {
+					this.#goalCoordinates = emergencyTarget;
+					this.onAcceleration(1); // Full speed to escape
+					this.onSetCoordinates(this.#goalCoordinates.x, this.#goalCoordinates.y);
+					
+					// Draw emergency indicator
+					visualizer.drawCircle(
+						{
+							x: this.#x,
+							y: this.#y,
+							r: 100,
+						},
+						"red",
+						true,
+						0.3,
+					);
+					visualizer.drawLine(
+						{
+							x: this.#x,
+							y: this.#y,
+						},
+						this.#goalCoordinates,
+						"red",
+					);
+					return; // Skip normal behavior
+				}
+			}
+		}
+
+		// Normal bot behavior continues
 		if (this.#snakeLength < this.opt.followCircleLength) {
 			this.stage = "grow";
 		}
@@ -1378,6 +1429,24 @@ export class Bot {
 			},
 			"red",
 		);
+
+		// GOD MODE: Draw threat visualizations
+		if (godMode.isEnabled()) {
+			const stats = godMode.getStats();
+			if (stats.threatCount > 0) {
+				// Draw threat count indicator
+				visualizer.drawCircle(
+					{
+						x: this.#x,
+						y: this.#y - 80,
+						r: 20,
+					},
+					"orange",
+					true,
+					0.5,
+				);
+			}
+		}
 	}
 
 	public destory() {
