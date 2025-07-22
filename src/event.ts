@@ -6,6 +6,8 @@ import {
 	prefVisibleState,
 	radiusMultState,
 	visualizeState,
+	godModeEnabledState,
+	godModeVisualsState,
 } from "./overlay";
 
 const toggleBot = () => {
@@ -18,8 +20,15 @@ const toggleVisualizer = () => {
 };
 
 const toggleGodMode = () => {
-	bot.godModeEnabled(!bot.isGodModeEnabled());
-	console.log("God Mode:", bot.isGodModeEnabled() ? "ENABLED" : "DISABLED");
+	godModeEnabledState.val = !godModeEnabledState.val;
+	bot.godModeEnabled(godModeEnabledState.val);
+	console.log("God Mode Assist:", godModeEnabledState.val ? "ENABLED" : "DISABLED");
+};
+
+const toggleGodModeVisuals = () => {
+	godModeVisualsState.val = !godModeVisualsState.val;
+	bot.godModeVisualsEnabled(godModeVisualsState.val);
+	console.log("God Mode Visuals:", godModeVisualsState.val ? "ENABLED" : "DISABLED");
 };
 
 const increaseRadiusMult = () => {
@@ -86,8 +95,14 @@ const keyMap: Record<string, () => void> = {
 	y: () => {
 		toggleVisualizer();
 	},
-	u: () => {
+	g: () => {
 		toggleGodMode();
+	},
+	x: () => {
+		toggleGodModeVisuals();
+	},
+	f: () => {
+		toggleGfx();
 	},
 	a: () => {
 		increaseRadiusMult();
@@ -97,9 +112,6 @@ const keyMap: Record<string, () => void> = {
 	},
 	i: () => {
 		toggleAutoRespawn();
-	},
-	g: () => {
-		toggleGfx();
 	},
 	escape: () => {
 		quickRespawn();

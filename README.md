@@ -20,9 +20,10 @@ This repository is based on the Championship Edition code and adapted to the new
 |---|---|
 | T / Right Click | Bot enabled/disabled |
 | Y | Visual debugging |
-| U | **God Mode enabled/disabled** |
+| G | **God Mode Assist enabled/disabled** |
+| X | **God Mode Visuals enabled/disabled** |
 | I | Automatic Respawning |
-| G | No graphics mode |
+| F | No graphics mode |
 | H | Hide overlays |
 | A / S | Collision radius multiplier increase / decrease |
 | Z | Reset zoom |
@@ -30,13 +31,34 @@ This repository is based on the Championship Edition code and adapted to the new
 | ESC | Quick respawn |
 | Q | Quit to menu |
 
-## God Mode Features
+## God Mode Assist Features
 
-The bot now includes an experimental **God Mode** that provides enhanced collision avoidance:
+The bot now includes an experimental **God Mode Assist** - a standalone collision avoidance system that works independently from the bot:
 
-- **Predictive Trajectory Analysis**: Predicts enemy snake movements up to 30 frames ahead
-- **Emergency Avoidance**: Automatically overrides normal bot behavior when immediate collision threats are detected
-- **Threat Level Assessment**: Analyzes multiple threats simultaneously and prioritizes the most dangerous ones
-- **Enhanced Survival**: Significantly improves survival rate in high-traffic areas
+### 🎯 **Key Features:**
+- **Independent Operation**: Works whether the bot is enabled or disabled - pure player assist
+- **Emergency Takeover**: Only takes control when immediate collision danger is detected
+- **Precision Avoidance**: Uses advanced angle calculations for minimal, precise corrections
+- **Smart Direction**: Analyzes multiple escape routes and chooses the safest path
+- **Transparent Operation**: Most of the time you won't notice it's there
 
-**Note**: God Mode is currently in alpha and focuses on collision avoidance. Kill opportunity detection will be added in future versions.
+### 🔧 **How It Works:**
+1. **Continuous Monitoring**: Constantly analyzes nearby threats while you play
+2. **Danger Detection**: Calculates threat levels based on distance, angle, and collision probability
+3. **Emergency Response**: Takes temporary control only when collision is imminent
+4. **Quick Release**: Returns control to you as soon as you're safe
+
+### 🎮 **Usage:**
+- **Press G** to enable/disable God Mode Assist
+- **Press X** to toggle visual debugging (shows danger zones and threat indicators)
+- The system works independently of the bot - use it for manual play assistance
+- Visual indicators show when the system is monitoring vs actively controlling
+
+### 🎨 **Visual Indicators (Press X):**
+- **Yellow Circle**: Danger detection radius
+- **Red Circle**: Emergency response radius  
+- **Red Text**: "GOD MODE ACTIVE" when system has taken control
+- **Green Line**: Direction of emergency avoidance
+- **Threat Level**: Percentage indicator of current danger
+
+This system is designed to make you virtually invincible while maintaining the feel of manual gameplay!

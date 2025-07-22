@@ -11,6 +11,10 @@ export const autoRespawnState = state(false);
 export const gfxEnabledState = state(true);
 export const prefVisibleState = state(true);
 
+// God Mode states
+export const godModeEnabledState = state(false);
+export const godModeVisualsState = state(false);
+
 export const fpsState = state(0);
 export const pingState = state<`${number}ms`>("0ms");
 export const serverState = state("[0:0:0:0:0:0:0:0]:444");
@@ -84,7 +88,21 @@ export const prefOverlay = div(
 			),
 		]),
 		div({ class: "pref-overlay__item" }, [
-			span({ class: "pref-overlay__label" }, "[G] Toggle GFX: "),
+			span({ class: "pref-overlay__label" }, "[G] God Mode Assist: "),
+			span(
+				{ class: getToggleClass(godModeEnabledState) },
+				getToggleValue(godModeEnabledState),
+			),
+		]),
+		div({ class: "pref-overlay__item" }, [
+			span({ class: "pref-overlay__label" }, "[X] God Mode Visuals: "),
+			span(
+				{ class: getToggleClass(godModeVisualsState) },
+				getToggleValue(godModeVisualsState),
+			),
+		]),
+		div({ class: "pref-overlay__item" }, [
+			span({ class: "pref-overlay__label" }, "[F] Toggle GFX: "),
 			span(
 				{ class: getToggleClass(gfxEnabledState) },
 				getToggleValue(gfxEnabledState),
