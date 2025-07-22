@@ -30,6 +30,12 @@ const init = () => {
 		// God Mode Assist - works independently of bot
 		if (window.playing && window.slither !== null) {
 			checkGodModeAssist();
+			
+			// Draw god mode visuals independently
+			const ctx = window.mc?.getContext("2d");
+			if (ctx && bot.isGodModeVisualsEnabled()) {
+				bot.drawGodModeVisuals(ctx, window.slither);
+			}
 		}
 
 		// Bot behavior
