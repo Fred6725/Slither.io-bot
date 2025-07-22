@@ -20,6 +20,7 @@ This repository is based on the Championship Edition code and adapted to the new
 |---|---|
 | T / Right Click | Bot enabled/disabled |
 | Y | Visual debugging |
+| U | **God Mode enabled/disabled** |
 | I | Automatic Respawning |
 | G | No graphics mode |
 | H | Hide overlays |
@@ -28,3 +29,14 @@ This repository is based on the Championship Edition code and adapted to the new
 | Mouse wheel / M / N | Zoom in/out |
 | ESC | Quick respawn |
 | Q | Quit to menu |
+
+## God Mode Features
+
+The bot now includes an experimental **God Mode** that provides enhanced collision avoidance:
+
+- **Predictive Trajectory Analysis**: Predicts enemy snake movements up to 30 frames ahead
+- **Emergency Avoidance**: Automatically overrides normal bot behavior when immediate collision threats are detected
+- **Threat Level Assessment**: Analyzes multiple threats simultaneously and prioritizes the most dangerous ones
+- **Enhanced Survival**: Significantly improves survival rate in high-traffic areas
+
+**Note**: God Mode is currently in alpha and focuses on collision avoidance. Kill opportunity detection will be added in future versions.

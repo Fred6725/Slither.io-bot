@@ -214,8 +214,162 @@ The MIT License (MIT)
     }
   };
 
+  // src/bot/god-mode.ts
+  var GodMode = class {
+    state = {
+      enabled: false,
+      collisionPredictionFrames: 30,
+      emergencyAvoidanceActive: false,
+      lastEmergencyTime: 0,
+      threatAnalyses: [],
+      killOpportunities: []
+    };
+    opt = {
+      predictionFrames: 30,
+      minThreatDistance: 100,
+      emergencyCooldown: 60,
+      maxThreatLevel: 0.8,
+      trajectorySteps: 5,
+      killOpportunityThreshold: 0.7
+    };
+    isEnabled() {
+      return this.state.enabled;
+    }
+    setEnabled(enabled) {
+      this.state.enabled = enabled;
+      if (!enabled) {
+        this.state.emergencyAvoidanceActive = false;
+        this.state.threatAnalyses = [];
+        this.state.killOpportunities = [];
+      }
+    }
+    predictSnakeTrajectory(snake, frames) {
+      const trajectory = [];
+      let x = snake.xx;
+      let y = snake.yy;
+      let angle = snake.ang;
+      const speed = snake.sp;
+      for (let frame = 0; frame < frames; frame++) {
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        x += speed * cos;
+        y += speed * sin;
+        trajectory.push({
+          x,
+          y,
+          time: frame,
+          angle,
+          speed
+        });
+        angle += (Math.random() - 0.5) * 0.1;
+      }
+      return trajectory;
+    }
+    analyzeCollisionThreat(ourSnake, targetSnake, trajectory) {
+      const ourX = ourSnake.xx;
+      const ourY = ourSnake.yy;
+      const ourSpeed = ourSnake.sp;
+      const ourAngle = ourSnake.ang;
+      const dangerRadius = 50;
+      let minDistance = Infinity;
+      let collisionTime = Infinity;
+      let threatLevel = 0;
+      for (let frame = 0; frame < trajectory.length; frame++) {
+        const targetPos = trajectory[frame];
+        const ourCos = Math.cos(ourAngle);
+        const ourSin = Math.sin(ourAngle);
+        const ourPredictedX = ourX + ourSpeed * ourCos * frame;
+        const ourPredictedY = ourY + ourSpeed * ourSin * frame;
+        const distance = Math.sqrt(
+          getDistance2(ourPredictedX, ourPredictedY, targetPos.x, targetPos.y)
+        );
+        if (distance < minDistance) {
+          minDistance = distance;
+          collisionTime = frame;
+        }
+        if (distance < dangerRadius && frame < this.opt.predictionFrames / 2) {
+          threatLevel = Math.max(threatLevel, 1 - distance / dangerRadius);
+        }
+      }
+      if (threatLevel > 0.1) {
+        const targetPos = trajectory[Math.min(collisionTime, trajectory.length - 1)];
+        const avoidanceAngle = fastAtan2(
+          targetPos.y - ourY,
+          targetPos.x - ourX
+        ) + Math.PI / 2;
+        return {
+          snakeId: targetSnake.id,
+          threatLevel,
+          timeToCollision: collisionTime,
+          avoidanceAngle,
+          priority: threatLevel * (1 / (collisionTime + 1))
+        };
+      }
+      return null;
+    }
+    analyzeThreats(ourSnake) {
+      if (!this.state.enabled || !ourSnake) {
+        return {
+          threats: [],
+          opportunities: [],
+          emergencyAvoidance: false
+        };
+      }
+      const threats = [];
+      for (let i = 0; i < window.slithers.length; i++) {
+        const snake = window.slithers[i];
+        if (!snake || snake.id === ourSnake.id || snake.dead) {
+          continue;
+        }
+        const distance = Math.sqrt(
+          getDistance2(ourSnake.xx, ourSnake.yy, snake.xx, snake.yy)
+        );
+        if (distance > 500) {
+          continue;
+        }
+        const trajectory = this.predictSnakeTrajectory(snake, this.opt.predictionFrames);
+        const threat = this.analyzeCollisionThreat(ourSnake, snake, trajectory);
+        if (threat) {
+          threats.push(threat);
+        }
+      }
+      threats.sort((a, b) => b.priority - a.priority);
+      const maxThreat = threats[0];
+      const emergencyAvoidance = maxThreat && maxThreat.threatLevel > this.opt.maxThreatLevel && maxThreat.timeToCollision < 10;
+      this.state.threatAnalyses = threats;
+      this.state.emergencyAvoidanceActive = emergencyAvoidance || false;
+      return {
+        threats,
+        opportunities: [],
+        emergencyAvoidance: emergencyAvoidance || false
+      };
+    }
+    getEmergencyAvoidanceTarget(ourSnake) {
+      if (!this.state.emergencyAvoidanceActive || this.state.threatAnalyses.length === 0) {
+        return null;
+      }
+      const primaryThreat = this.state.threatAnalyses[0];
+      const avoidanceDistance = 200;
+      const cos = Math.cos(primaryThreat.avoidanceAngle);
+      const sin = Math.sin(primaryThreat.avoidanceAngle);
+      return {
+        x: ourSnake.xx + cos * avoidanceDistance,
+        y: ourSnake.yy + sin * avoidanceDistance
+      };
+    }
+    getStats() {
+      return {
+        enabled: this.state.enabled,
+        threatCount: this.state.threatAnalyses.length,
+        emergencyActive: this.state.emergencyAvoidanceActive,
+        maxThreatLevel: this.state.threatAnalyses[0]?.threatLevel || 0
+      };
+    }
+  };
+
   // src/bot/bot.ts
   var visualizer = new Visualizer();
+  var godMode = new GodMode();
   var Bot = class {
     stage = "grow";
     collisionPoints = [];
@@ -281,6 +435,15 @@ The MIT License (MIT)
     };
     visualizeEnabled(enabled) {
       visualizer.enabled = enabled;
+    }
+    godModeEnabled(enabled) {
+      godMode.setEnabled(enabled);
+    }
+    isGodModeEnabled() {
+      return godMode.isEnabled();
+    }
+    getGodModeStats() {
+      return godMode.getStats();
     }
     getSnakeLength(sk) {
       if (null == sk || 0 > sk.sct || 0 > sk.fam || 0 > sk.rsc) {
@@ -1215,6 +1378,36 @@ The MIT License (MIT)
       const ctx = window.mc.getContext("2d");
       if (ctx) visualizer.setContext(ctx);
       this.every();
+      if (godMode.isEnabled() && window.slither) {
+        const analysis = godMode.analyzeThreats(window.slither);
+        if (analysis.emergencyAvoidance) {
+          const emergencyTarget = godMode.getEmergencyAvoidanceTarget(window.slither);
+          if (emergencyTarget) {
+            this.#goalCoordinates = emergencyTarget;
+            this.onAcceleration(1);
+            this.onSetCoordinates(this.#goalCoordinates.x, this.#goalCoordinates.y);
+            visualizer.drawCircle(
+              {
+                x: this.#x,
+                y: this.#y,
+                r: 100
+              },
+              "red",
+              true,
+              0.3
+            );
+            visualizer.drawLine(
+              {
+                x: this.#x,
+                y: this.#y
+              },
+              this.#goalCoordinates,
+              "red"
+            );
+            return;
+          }
+        }
+      }
       if (this.#snakeLength < this.opt.followCircleLength) {
         this.stage = "grow";
       }
@@ -1255,6 +1448,21 @@ The MIT License (MIT)
         },
         "red"
       );
+      if (godMode.isEnabled()) {
+        const stats = godMode.getStats();
+        if (stats.threatCount > 0) {
+          visualizer.drawCircle(
+            {
+              x: this.#x,
+              y: this.#y - 80,
+              r: 20
+            },
+            "orange",
+            true,
+            0.5
+          );
+        }
+      }
     }
     destory() {
       this.#delayFrame = 0;
@@ -1560,6 +1768,10 @@ The MIT License (MIT)
     visualizeState.val = !visualizeState.val;
     bot.visualizeEnabled(visualizeState.val);
   };
+  var toggleGodMode = () => {
+    bot.godModeEnabled(!bot.isGodModeEnabled());
+    console.log("God Mode:", bot.isGodModeEnabled() ? "ENABLED" : "DISABLED");
+  };
   var increaseRadiusMult = () => {
     bot.opt.radiusMult = Math.min(bot.opt.radiusMult + 1, 30);
     radiusMultState.val = bot.opt.radiusMult;
@@ -1608,6 +1820,9 @@ The MIT License (MIT)
     },
     y: () => {
       toggleVisualizer();
+    },
+    u: () => {
+      toggleGodMode();
     },
     a: () => {
       increaseRadiusMult();

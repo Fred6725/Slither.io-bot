@@ -17,6 +17,11 @@ const toggleVisualizer = () => {
 	bot.visualizeEnabled(visualizeState.val);
 };
 
+const toggleGodMode = () => {
+	bot.godModeEnabled(!bot.isGodModeEnabled());
+	console.log("God Mode:", bot.isGodModeEnabled() ? "ENABLED" : "DISABLED");
+};
+
 const increaseRadiusMult = () => {
 	bot.opt.radiusMult = Math.min(bot.opt.radiusMult + 1, 30);
 	radiusMultState.val = bot.opt.radiusMult;
@@ -80,6 +85,9 @@ const keyMap: Record<string, () => void> = {
 	},
 	y: () => {
 		toggleVisualizer();
+	},
+	u: () => {
+		toggleGodMode();
 	},
 	a: () => {
 		increaseRadiusMult();
