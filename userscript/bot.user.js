@@ -229,25 +229,23 @@ The MIT License (MIT)
     lastControlTime = 0;
     originalMouseControl = null;
     opt = {
-      // Detection settings - made more sensitive for testing
-      predictionFrames: 20,
-      // Frames to look ahead
-      dangerRadius: 120,
-      // Increased for easier testing
-      emergencyRadius: 70,
-      // Increased for easier testing
-      // Response settings - made more responsive
-      maxThreatLevel: 0.3,
-      // Lower threshold for testing
-      controlCooldown: 5,
-      // Reduced cooldown for testing
-      minControlDuration: 3,
-      // Reduced minimum control time
-      // Precision settings
-      angleAdjustmentPrecision: 0.15,
-      // Slightly more aggressive for visibility
-      speedBoostThreshold: 0.7,
-      // Lower threshold for speed boost
+      // Detection settings - tuned for real physics
+      predictionFrames: 60,
+      // 1 second lookahead at 60fps
+      dangerRadius: 80,
+      // Reasonable detection radius
+      emergencyRadius: 40,
+      // Emergency response distance
+      // Response settings - precise control
+      maxThreatLevel: 0.4,
+      // Activate when 40% threat or higher
+      controlCooldown: 15,
+      // Prevent rapid takeovers
+      minControlDuration: 10,
+      // Hold control long enough to complete maneuver
+      // Physics settings
+      speedBoostThreshold: 0.8,
+      // Boost when 80% threat or higher
       tightSpaceThreshold: 80
       // Distance threshold for tight space detection
     };
@@ -294,79 +292,192 @@ The MIT License (MIT)
       return trajectory;
     }
     /**
-     * Analyzes collision threat with precision angle and distance calculations
+     * Analyzes collision threat using proper trajectory physics
      */
     analyzeCollisionThreat(ourSnake, targetSnake) {
       const ourX = ourSnake.xx;
       const ourY = ourSnake.yy;
       const ourAngle = ourSnake.ang;
       const ourSpeed = ourSnake.sp;
-      const headDistance = Math.sqrt(getDistance2(ourX, ourY, targetSnake.xx, targetSnake.yy));
-      const headThreat = this.calculateDirectThreat(ourSnake, targetSnake.xx, targetSnake.yy, headDistance);
-      let maxBodyThreat = null;
+      let closestCollision = null;
+      const headCollision = this.calculateTrajectoryCollision(
+        ourSnake,
+        { x: targetSnake.xx, y: targetSnake.yy, speed: targetSnake.sp, angle: targetSnake.ang },
+        25
+        // Head radius
+      );
+      if (headCollision) {
+        closestCollision = headCollision;
+      }
       if (targetSnake.pts) {
         for (const pt of targetSnake.pts) {
           if (pt && !pt.dying) {
-            const bodyDistance = Math.sqrt(getDistance2(ourX, ourY, pt.xx, pt.yy));
-            if (bodyDistance < this.opt.dangerRadius * 2) {
-              const bodyThreat = this.calculateDirectThreat(ourSnake, pt.xx, pt.yy, bodyDistance);
-              if (bodyThreat && (!maxBodyThreat || bodyThreat.threatLevel > maxBodyThreat.threatLevel)) {
-                maxBodyThreat = bodyThreat;
+            const bodyCollision = this.calculateTrajectoryCollision(
+              ourSnake,
+              { x: pt.xx, y: pt.yy, speed: 0, angle: 0 },
+              // Body segments are stationary
+              15
+              // Body radius
+            );
+            if (bodyCollision && (!closestCollision || bodyCollision.timeToCollision < closestCollision.timeToCollision)) {
+              closestCollision = bodyCollision;
+            }
+          }
+        }
+      }
+      if (!closestCollision) return null;
+      const avoidanceAngle = this.calculateAvoidanceAngle(
+        ourSnake,
+        closestCollision.point,
+        closestCollision.collisionAngle,
+        closestCollision.threatLevel
+      );
+      return {
+        snakeId: targetSnake.id,
+        threatLevel: closestCollision.threatLevel,
+        timeToCollision: closestCollision.timeToCollision,
+        avoidanceAngle,
+        priority: closestCollision.threatLevel * (1 / Math.max(closestCollision.timeToCollision, 1))
+      };
+    }
+    /**
+     * Calculates trajectory-based collision using proper physics
+     */
+    calculateTrajectoryCollision(ourSnake, target, targetRadius) {
+      const ourX = ourSnake.xx;
+      const ourY = ourSnake.yy;
+      const ourAngle = ourSnake.ang;
+      const ourSpeed = ourSnake.sp;
+      const ourVx = ourSpeed * Math.cos(ourAngle);
+      const ourVy = ourSpeed * Math.sin(ourAngle);
+      const targetVx = target.speed * Math.cos(target.angle);
+      const targetVy = target.speed * Math.sin(target.angle);
+      const dx = target.x - ourX;
+      const dy = target.y - ourY;
+      const dvx = targetVx - ourVx;
+      const dvy = targetVy - ourVy;
+      const collisionRadius = 15 + targetRadius + 10;
+      const a = dvx * dvx + dvy * dvy;
+      const b = 2 * (dx * dvx + dy * dvy);
+      const c = dx * dx + dy * dy - collisionRadius * collisionRadius;
+      if (Math.abs(a) < 1e-3) {
+        const currentDistance = Math.sqrt(dx * dx + dy * dy);
+        if (currentDistance <= collisionRadius) {
+          return {
+            point: { x: target.x, y: target.y },
+            timeToCollision: 0,
+            threatLevel: 1,
+            collisionAngle: Math.atan2(dy, dx)
+          };
+        }
+        return null;
+      }
+      const discriminant = b * b - 4 * a * c;
+      if (discriminant < 0) return null;
+      const sqrtDiscriminant = Math.sqrt(discriminant);
+      const t1 = (-b - sqrtDiscriminant) / (2 * a);
+      const t2 = (-b + sqrtDiscriminant) / (2 * a);
+      let collisionTime = -1;
+      if (t1 > 0 && t2 > 0) {
+        collisionTime = Math.min(t1, t2);
+      } else if (t1 > 0) {
+        collisionTime = t1;
+      } else if (t2 > 0) {
+        collisionTime = t2;
+      } else {
+        return null;
+      }
+      const maxLookaheadFrames = 120;
+      if (collisionTime > maxLookaheadFrames) return null;
+      const collisionX = ourX + ourVx * collisionTime;
+      const collisionY = ourY + ourVy * collisionTime;
+      const collisionAngle = Math.atan2(collisionY - ourY, collisionX - ourX);
+      const threatLevel = Math.max(0, Math.min(1, 1 - collisionTime / 60));
+      const angleToCollision = Math.atan2(collisionY - ourY, collisionX - ourX);
+      const angleDifference = Math.abs(ourAngle - angleToCollision);
+      const normalizedAngleDiff = Math.min(angleDifference, 2 * Math.PI - angleDifference);
+      if (normalizedAngleDiff > Math.PI / 2) return null;
+      return {
+        point: { x: collisionX, y: collisionY },
+        timeToCollision: collisionTime,
+        threatLevel,
+        collisionAngle
+      };
+    }
+    /**
+     * Calculates optimal avoidance angle based on collision physics and approach angle
+     */
+    calculateAvoidanceAngle(ourSnake, collisionPoint, collisionAngle, threatLevel) {
+      const ourAngle = ourSnake.ang;
+      const ourSpeed = ourSnake.sp;
+      const approachAngle = Math.abs(ourAngle - collisionAngle);
+      const normalizedApproach = Math.min(approachAngle, 2 * Math.PI - approachAngle);
+      const isBoosting = ourSpeed > 6;
+      const turningMultiplier = isBoosting ? 0.7 : 1;
+      let correctionAngle;
+      if (normalizedApproach > Math.PI * 0.7) {
+        correctionAngle = Math.PI * 0.4 * turningMultiplier;
+      } else if (normalizedApproach > Math.PI * 0.3) {
+        correctionAngle = Math.PI * 0.25 * turningMultiplier;
+      } else {
+        correctionAngle = Math.PI * 0.1 * turningMultiplier;
+      }
+      correctionAngle *= 0.5 + threatLevel * 0.5;
+      const turnDirection = this.determineBestTurnDirection(
+        ourSnake,
+        collisionPoint,
+        correctionAngle
+      );
+      const avoidanceAngle = ourAngle + turnDirection * correctionAngle;
+      return (avoidanceAngle % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+    }
+    /**
+     * Determines the best turn direction considering space availability
+     */
+    determineBestTurnDirection(ourSnake, collisionPoint, correctionAngle) {
+      const ourX = ourSnake.xx;
+      const ourY = ourSnake.yy;
+      const ourAngle = ourSnake.ang;
+      const leftAngle = ourAngle + correctionAngle;
+      const rightAngle = ourAngle - correctionAngle;
+      const leftSpace = this.calculateAvailableSpace(ourSnake, leftAngle);
+      const rightSpace = this.calculateAvailableSpace(ourSnake, rightAngle);
+      if (Math.abs(leftSpace - rightSpace) < 20) {
+        const toCollision = { x: collisionPoint.x - ourX, y: collisionPoint.y - ourY };
+        const ourDirection = { x: Math.cos(ourAngle), y: Math.sin(ourAngle) };
+        const crossProduct = ourDirection.x * toCollision.y - ourDirection.y * toCollision.x;
+        return crossProduct > 0 ? -1 : 1;
+      } else {
+        return leftSpace > rightSpace ? 1 : -1;
+      }
+    }
+    /**
+     * Calculates available space in a given direction
+     */
+    calculateAvailableSpace(ourSnake, testAngle) {
+      const ourX = ourSnake.xx;
+      const ourY = ourSnake.yy;
+      const testDistance = 100;
+      const testX = ourX + Math.cos(testAngle) * testDistance;
+      const testY = ourY + Math.sin(testAngle) * testDistance;
+      let minDistance = testDistance;
+      if (window.slithers) {
+        for (let i = 0; i < window.slithers.length; i++) {
+          const snake = window.slithers[i];
+          if (!snake || snake.id === ourSnake.id || snake.dead) continue;
+          const headDist = Math.sqrt(getDistance2(testX, testY, snake.xx, snake.yy));
+          minDistance = Math.min(minDistance, headDist);
+          if (snake.pts) {
+            for (const pt of snake.pts) {
+              if (pt && !pt.dying) {
+                const bodyDist = Math.sqrt(getDistance2(testX, testY, pt.xx, pt.yy));
+                minDistance = Math.min(minDistance, bodyDist);
               }
             }
           }
         }
       }
-      if (headThreat && maxBodyThreat) {
-        return headThreat.threatLevel > maxBodyThreat.threatLevel ? headThreat : maxBodyThreat;
-      }
-      return headThreat || maxBodyThreat;
-    }
-    /**
-     * Calculates direct threat level and optimal avoidance angle
-     */
-    calculateDirectThreat(ourSnake, targetX, targetY, distance) {
-      if (distance > this.opt.dangerRadius) return null;
-      const ourX = ourSnake.xx;
-      const ourY = ourSnake.yy;
-      const ourAngle = ourSnake.ang;
-      const angleToTarget = fastAtan2(targetY - ourY, targetX - ourX);
-      const relativeAngle = Math.abs(angleToTarget - ourAngle);
-      const normalizedAngle = Math.min(relativeAngle, 2 * Math.PI - relativeAngle);
-      if (normalizedAngle > Math.PI * 2 / 3) return null;
-      const distanceThreat = Math.max(0, 1 - distance / this.opt.dangerRadius);
-      const angleThreat = Math.max(0, 1 - normalizedAngle / (Math.PI / 2));
-      const threatLevel = distanceThreat * 0.7 + angleThreat * 0.3;
-      if (threatLevel < 0.1) return null;
-      let avoidanceAngle;
-      if (distance < this.opt.emergencyRadius) {
-        const escapeAngle = angleToTarget + (Math.random() > 0.5 ? Math.PI / 2 : -Math.PI / 2);
-        avoidanceAngle = escapeAngle;
-      } else {
-        const adjustmentMagnitude = this.opt.angleAdjustmentPrecision * threatLevel;
-        const turnDirection = this.determineTurnDirection(ourSnake, targetX, targetY);
-        avoidanceAngle = ourAngle + turnDirection * adjustmentMagnitude;
-      }
-      return {
-        snakeId: -1,
-        // Not tracking specific snake IDs for direct threats
-        threatLevel,
-        timeToCollision: Math.max(1, distance / Math.max(ourSnake.sp, 1)),
-        avoidanceAngle,
-        priority: threatLevel * (this.opt.emergencyRadius / Math.max(distance, 1))
-      };
-    }
-    /**
-     * Determines optimal turn direction to avoid obstacle
-     */
-    determineTurnDirection(ourSnake, targetX, targetY) {
-      const ourX = ourSnake.xx;
-      const ourY = ourSnake.yy;
-      const ourAngle = ourSnake.ang;
-      const toTarget = { x: targetX - ourX, y: targetY - ourY };
-      const ourDirection = { x: Math.cos(ourAngle), y: Math.sin(ourAngle) };
-      const crossProduct = ourDirection.x * toTarget.y - ourDirection.y * toTarget.x;
-      return crossProduct > 0 ? -1 : 1;
+      return minDistance;
     }
     /**
      * Main assist function - analyzes threats and takes control if necessary
@@ -412,25 +523,22 @@ The MIT License (MIT)
       return false;
     }
     /**
-     * Takes control of the snake to avoid collision
+     * Takes control of the snake to avoid collision - ONE PRECISE CORRECTION
      */
     takeControl(ourSnake, threat) {
       this.state.emergencyAvoidanceActive = true;
       this.lastControlTime = window.timeObj ? window.timeObj.now() : Date.now();
-      const safeAngle = this.calculateSafeAngle(ourSnake, threat);
-      this.setMouseDirection(safeAngle);
+      console.log(`\u{1F6A8} GOD MODE TAKEOVER! Threat: ${(threat.threatLevel * 100).toFixed(0)}%, Time: ${threat.timeToCollision.toFixed(1)} frames`);
+      this.setMouseDirection(threat.avoidanceAngle);
       if (threat.threatLevel > this.opt.speedBoostThreshold) {
         window.setAcceleration(1);
+        console.log(`\u26A1 BOOST ACTIVATED`);
       }
     }
     /**
-     * Continues emergency control
+     * Continues emergency control briefly to complete the maneuver
      */
     continueControl(ourSnake, threat) {
-      if (threat) {
-        const safeAngle = this.calculateSafeAngle(ourSnake, threat);
-        this.setMouseDirection(safeAngle);
-      }
     }
     /**
      * Releases control back to the player
@@ -438,60 +546,7 @@ The MIT License (MIT)
     releaseControl() {
       this.state.emergencyAvoidanceActive = false;
       window.setAcceleration(0);
-    }
-    /**
-     * Calculates the safest direction to move
-     */
-    calculateSafeAngle(ourSnake, threat) {
-      let safeAngle = threat.avoidanceAngle;
-      const testDistance = this.opt.dangerRadius;
-      const testX = ourSnake.xx + Math.cos(safeAngle) * testDistance;
-      const testY = ourSnake.yy + Math.sin(safeAngle) * testDistance;
-      let hasSecondaryThreat = false;
-      for (const otherThreat of this.state.threatAnalyses) {
-        if (otherThreat === threat) continue;
-        const threatDistance = Math.sqrt(
-          getDistance2(testX, testY, ourSnake.xx, ourSnake.yy)
-        );
-        if (threatDistance < this.opt.dangerRadius) {
-          hasSecondaryThreat = true;
-          break;
-        }
-      }
-      if (hasSecondaryThreat) {
-        const perpAngle1 = safeAngle + Math.PI / 2;
-        const perpAngle2 = safeAngle - Math.PI / 2;
-        const space1 = this.calculateOpenSpace(ourSnake, perpAngle1);
-        const space2 = this.calculateOpenSpace(ourSnake, perpAngle2);
-        safeAngle = space1 > space2 ? perpAngle1 : perpAngle2;
-      }
-      return safeAngle;
-    }
-    /**
-     * Calculates available open space in a direction
-     */
-    calculateOpenSpace(ourSnake, angle) {
-      const stepSize = 20;
-      const maxSteps = 5;
-      for (let step = 1; step <= maxSteps; step++) {
-        const testX = ourSnake.xx + Math.cos(angle) * stepSize * step;
-        const testY = ourSnake.yy + Math.sin(angle) * stepSize * step;
-        for (let i = 0; i < window.slithers.length; i++) {
-          const snake = window.slithers[i];
-          if (!snake || snake.id === ourSnake.id || snake.dead) continue;
-          const headDist = Math.sqrt(getDistance2(testX, testY, snake.xx, snake.yy));
-          if (headDist < 30) return step * stepSize;
-          if (snake.pts) {
-            for (const pt of snake.pts) {
-              if (pt && !pt.dying) {
-                const bodyDist = Math.sqrt(getDistance2(testX, testY, pt.xx, pt.yy));
-                if (bodyDist < 25) return step * stepSize;
-              }
-            }
-          }
-        }
-      }
-      return maxSteps * stepSize;
+      console.log(`\u2705 GOD MODE RELEASED - Control returned to player`);
     }
     /**
      * Sets mouse direction to control snake movement
@@ -513,14 +568,26 @@ The MIT License (MIT)
       const status = this.state.enabled ? "GOD MODE: ON" : "GOD MODE: OFF";
       ctx.fillText(status, 10, 70);
       if (!this.state.enabled) return;
+      const screenX = ourSnake.xx - window.view_xx;
+      const screenY = ourSnake.yy - window.view_yy;
       ctx.beginPath();
-      ctx.arc(ourSnake.xx - window.view_xx, ourSnake.yy - window.view_yy, this.opt.dangerRadius, 0, 2 * Math.PI);
+      ctx.arc(screenX, screenY, this.opt.dangerRadius, 0, 2 * Math.PI);
       ctx.strokeStyle = this.state.emergencyAvoidanceActive ? "rgba(255, 0, 0, 0.8)" : "rgba(255, 255, 0, 0.6)";
       ctx.lineWidth = 3;
       ctx.stroke();
       ctx.beginPath();
-      ctx.arc(ourSnake.xx - window.view_xx, ourSnake.yy - window.view_yy, this.opt.emergencyRadius, 0, 2 * Math.PI);
+      ctx.arc(screenX, screenY, this.opt.emergencyRadius, 0, 2 * Math.PI);
       ctx.strokeStyle = "rgba(255, 0, 0, 0.9)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      const rayLength = 150;
+      const ourAngle = ourSnake.ang;
+      const endX = screenX + Math.cos(ourAngle) * rayLength;
+      const endY = screenY + Math.sin(ourAngle) * rayLength;
+      ctx.beginPath();
+      ctx.moveTo(screenX, screenY);
+      ctx.lineTo(endX, endY);
+      ctx.strokeStyle = "rgba(0, 255, 255, 0.7)";
       ctx.lineWidth = 2;
       ctx.stroke();
       for (const threat of this.state.threatAnalyses) {
@@ -533,11 +600,11 @@ The MIT License (MIT)
           ctx.arc(ourSnake.xx - window.view_xx, ourSnake.yy - window.view_yy - 50, 10, 0, 2 * Math.PI);
           ctx.fill();
           if (this.state.emergencyAvoidanceActive) {
-            const endX = ourSnake.xx + Math.cos(threat.avoidanceAngle) * 80 - window.view_xx;
-            const endY = ourSnake.yy + Math.sin(threat.avoidanceAngle) * 80 - window.view_yy;
+            const endX2 = ourSnake.xx + Math.cos(threat.avoidanceAngle) * 80 - window.view_xx;
+            const endY2 = ourSnake.yy + Math.sin(threat.avoidanceAngle) * 80 - window.view_yy;
             ctx.beginPath();
             ctx.moveTo(ourSnake.xx - window.view_xx, ourSnake.yy - window.view_yy);
-            ctx.lineTo(endX, endY);
+            ctx.lineTo(endX2, endY2);
             ctx.strokeStyle = "rgba(0, 255, 0, 0.8)";
             ctx.lineWidth = 3;
             ctx.stroke();
