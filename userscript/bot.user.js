@@ -292,144 +292,143 @@ The MIT License (MIT)
       return trajectory;
     }
     /**
-     * Analyzes collision threat using proper trajectory physics
+     * Get collision points using the bot's proven method
      */
-    analyzeCollisionThreat(ourSnake, targetSnake) {
-      const ourX = ourSnake.xx;
-      const ourY = ourSnake.yy;
-      const ourAngle = ourSnake.ang;
-      const ourSpeed = ourSnake.sp;
-      let closestCollision = null;
-      const headCollision = this.calculateTrajectoryCollision(
-        ourSnake,
-        { x: targetSnake.xx, y: targetSnake.yy, speed: targetSnake.sp, angle: targetSnake.ang },
-        25
-        // Head radius
-      );
-      if (headCollision) {
-        closestCollision = headCollision;
-      }
-      if (targetSnake.pts) {
-        for (const pt of targetSnake.pts) {
-          if (pt && !pt.dying) {
-            const bodyCollision = this.calculateTrajectoryCollision(
-              ourSnake,
-              { x: pt.xx, y: pt.yy, speed: 0, angle: 0 },
-              // Body segments are stationary
-              15
-              // Body radius
-            );
-            if (bodyCollision && (!closestCollision || bodyCollision.timeToCollision < closestCollision.timeToCollision)) {
-              closestCollision = bodyCollision;
+    getCollisionPointsLikeBoot(ourSnake) {
+      const collisionPoints = [];
+      const ourWidth = Math.round(ourSnake.sc * 29);
+      const farCollisionD2 = (ourWidth * 50) ** 2;
+      for (let i = 0; i < window.slithers.length; i++) {
+        if (window.slithers[i].id === ourSnake.id) continue;
+        const s = window.slithers[i];
+        if (!s || s.dead) continue;
+        const sRadius = Math.round(s.sc * 29) / 2;
+        const headD2 = getDistance2(ourSnake.xx, ourSnake.yy, s.xx, s.yy);
+        if (headD2 < this.opt.dangerRadius * this.opt.dangerRadius * 4) {
+          collisionPoints.push({
+            x: s.xx,
+            y: s.yy,
+            r: sRadius,
+            d2: headD2,
+            si: i,
+            type: 0,
+            // head
+            speed: s.sp
+          });
+        }
+        const pts = s.pts;
+        if (pts) {
+          for (let j = 0; j < pts.length; j++) {
+            const po = pts[j];
+            if (!po || po.dying) continue;
+            const pd2 = getDistance2(ourSnake.xx, ourSnake.yy, po.xx, po.yy);
+            if (pd2 < this.opt.dangerRadius * this.opt.dangerRadius * 4) {
+              collisionPoints.push({
+                x: po.xx,
+                y: po.yy,
+                r: sRadius,
+                d2: pd2,
+                si: i,
+                type: 1
+                // body
+              });
             }
           }
         }
       }
-      if (!closestCollision) return null;
-      const avoidanceAngle = this.calculateAvoidanceAngle(
-        ourSnake,
-        closestCollision.point,
-        closestCollision.collisionAngle,
-        closestCollision.threatLevel
-      );
-      return {
-        snakeId: targetSnake.id,
-        threatLevel: closestCollision.threatLevel,
-        timeToCollision: closestCollision.timeToCollision,
-        avoidanceAngle,
-        priority: closestCollision.threatLevel * (1 / Math.max(closestCollision.timeToCollision, 1))
-      };
+      return collisionPoints;
     }
     /**
-     * Calculates trajectory-based collision using proper physics
+     * Analyzes collision point with trajectory prediction
      */
-    calculateTrajectoryCollision(ourSnake, target, targetRadius) {
+    analyzeCollisionPointWithTrajectory(ourSnake, cp) {
       const ourX = ourSnake.xx;
       const ourY = ourSnake.yy;
       const ourAngle = ourSnake.ang;
       const ourSpeed = ourSnake.sp;
       const ourVx = ourSpeed * Math.cos(ourAngle);
       const ourVy = ourSpeed * Math.sin(ourAngle);
-      const targetVx = target.speed * Math.cos(target.angle);
-      const targetVy = target.speed * Math.sin(target.angle);
-      const dx = target.x - ourX;
-      const dy = target.y - ourY;
-      const dvx = targetVx - ourVx;
-      const dvy = targetVy - ourVy;
-      const collisionRadius = 15 + targetRadius + 10;
+      let targetVx = 0;
+      let targetVy = 0;
+      if (cp.type === 0 && cp.speed) {
+        const targetSnake = window.slithers[cp.si];
+        if (targetSnake) {
+          targetVx = cp.speed * Math.cos(targetSnake.ang);
+          targetVy = cp.speed * Math.sin(targetSnake.ang);
+        }
+      }
+      const timeToCollision = this.calculateTimeToCollision(
+        { x: ourX, y: ourY, vx: ourVx, vy: ourVy },
+        { x: cp.x, y: cp.y, vx: targetVx, vy: targetVy },
+        cp.r + 15
+        // collision radius (target radius + our radius)
+      );
+      if (timeToCollision <= 0 || timeToCollision > 120) return null;
+      const threatLevel = Math.max(0, Math.min(1, 1 - timeToCollision / 60));
+      const angleToTarget = Math.atan2(cp.y - ourY, cp.x - ourX);
+      const angleDifference = Math.abs(ourAngle - angleToTarget);
+      const normalizedAngleDiff = Math.min(angleDifference, 2 * Math.PI - angleDifference);
+      if (normalizedAngleDiff > Math.PI / 2) return null;
+      const avoidanceAngle = this.calculateSmartAvoidanceAngle(
+        ourSnake,
+        { x: cp.x, y: cp.y },
+        normalizedAngleDiff,
+        threatLevel
+      );
+      return {
+        snakeId: cp.si,
+        threatLevel,
+        timeToCollision,
+        avoidanceAngle,
+        priority: threatLevel * (1 / Math.max(timeToCollision, 1))
+      };
+    }
+    /**
+     * Simplified time-to-collision calculation
+     */
+    calculateTimeToCollision(obj1, obj2, collisionRadius) {
+      const dx = obj2.x - obj1.x;
+      const dy = obj2.y - obj1.y;
+      const dvx = obj2.vx - obj1.vx;
+      const dvy = obj2.vy - obj1.vy;
       const a = dvx * dvx + dvy * dvy;
       const b = 2 * (dx * dvx + dy * dvy);
       const c = dx * dx + dy * dy - collisionRadius * collisionRadius;
       if (Math.abs(a) < 1e-3) {
         const currentDistance = Math.sqrt(dx * dx + dy * dy);
-        if (currentDistance <= collisionRadius) {
-          return {
-            point: { x: target.x, y: target.y },
-            timeToCollision: 0,
-            threatLevel: 1,
-            collisionAngle: Math.atan2(dy, dx)
-          };
-        }
-        return null;
+        return currentDistance <= collisionRadius ? 0 : -1;
       }
       const discriminant = b * b - 4 * a * c;
-      if (discriminant < 0) return null;
+      if (discriminant < 0) return -1;
       const sqrtDiscriminant = Math.sqrt(discriminant);
       const t1 = (-b - sqrtDiscriminant) / (2 * a);
       const t2 = (-b + sqrtDiscriminant) / (2 * a);
-      let collisionTime = -1;
-      if (t1 > 0 && t2 > 0) {
-        collisionTime = Math.min(t1, t2);
-      } else if (t1 > 0) {
-        collisionTime = t1;
-      } else if (t2 > 0) {
-        collisionTime = t2;
-      } else {
-        return null;
-      }
-      const maxLookaheadFrames = 120;
-      if (collisionTime > maxLookaheadFrames) return null;
-      const collisionX = ourX + ourVx * collisionTime;
-      const collisionY = ourY + ourVy * collisionTime;
-      const collisionAngle = Math.atan2(collisionY - ourY, collisionX - ourX);
-      const threatLevel = Math.max(0, Math.min(1, 1 - collisionTime / 60));
-      const angleToCollision = Math.atan2(collisionY - ourY, collisionX - ourX);
-      const angleDifference = Math.abs(ourAngle - angleToCollision);
-      const normalizedAngleDiff = Math.min(angleDifference, 2 * Math.PI - angleDifference);
-      if (normalizedAngleDiff > Math.PI / 2) return null;
-      return {
-        point: { x: collisionX, y: collisionY },
-        timeToCollision: collisionTime,
-        threatLevel,
-        collisionAngle
-      };
+      if (t1 > 0) return t1;
+      if (t2 > 0) return t2;
+      return -1;
     }
     /**
-     * Calculates optimal avoidance angle based on collision physics and approach angle
+     * Calculates smart avoidance angle based on approach angle and boost state
      */
-    calculateAvoidanceAngle(ourSnake, collisionPoint, collisionAngle, threatLevel) {
+    calculateSmartAvoidanceAngle(ourSnake, targetPoint, approachAngle, threatLevel) {
       const ourAngle = ourSnake.ang;
       const ourSpeed = ourSnake.sp;
-      const approachAngle = Math.abs(ourAngle - collisionAngle);
-      const normalizedApproach = Math.min(approachAngle, 2 * Math.PI - approachAngle);
       const isBoosting = ourSpeed > 6;
-      const turningMultiplier = isBoosting ? 0.7 : 1;
-      let correctionAngle;
-      if (normalizedApproach > Math.PI * 0.7) {
-        correctionAngle = Math.PI * 0.4 * turningMultiplier;
-      } else if (normalizedApproach > Math.PI * 0.3) {
-        correctionAngle = Math.PI * 0.25 * turningMultiplier;
+      const boostMultiplier = isBoosting ? 0.6 : 1;
+      let correctionMagnitude;
+      if (approachAngle > Math.PI * 0.7) {
+        correctionMagnitude = Math.PI * 0.5;
+      } else if (approachAngle > Math.PI * 0.4) {
+        correctionMagnitude = Math.PI * 0.3;
       } else {
-        correctionAngle = Math.PI * 0.1 * turningMultiplier;
+        correctionMagnitude = Math.PI * 0.15;
       }
-      correctionAngle *= 0.5 + threatLevel * 0.5;
-      const turnDirection = this.determineBestTurnDirection(
-        ourSnake,
-        collisionPoint,
-        correctionAngle
-      );
-      const avoidanceAngle = ourAngle + turnDirection * correctionAngle;
-      return (avoidanceAngle % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+      correctionMagnitude *= boostMultiplier * (0.7 + threatLevel * 0.3);
+      const targetAngle = Math.atan2(targetPoint.y - ourSnake.yy, targetPoint.x - ourSnake.xx);
+      const angleDiff = ourAngle - targetAngle;
+      const normalizedDiff = (angleDiff + Math.PI) % (2 * Math.PI) - Math.PI;
+      const turnDirection = normalizedDiff > 0 ? 1 : -1;
+      return ourAngle + turnDirection * correctionMagnitude;
     }
     /**
      * Determines the best turn direction considering space availability
@@ -481,25 +480,17 @@ The MIT License (MIT)
     }
     /**
      * Main assist function - analyzes threats and takes control if necessary
+     * Uses bot's proven collision detection with trajectory prediction
      */
     checkAndAssist(ourSnake) {
       if (!this.state.enabled || !ourSnake || !window.playing) {
         return false;
       }
+      const collisionPoints = this.getCollisionPointsLikeBoot(ourSnake);
       const threats = [];
       const currentTime = window.timeObj ? window.timeObj.now() : Date.now();
-      for (let i = 0; i < window.slithers.length; i++) {
-        const snake = window.slithers[i];
-        if (!snake || snake.id === ourSnake.id || snake.dead) {
-          continue;
-        }
-        const distance = Math.sqrt(
-          getDistance2(ourSnake.xx, ourSnake.yy, snake.xx, snake.yy)
-        );
-        if (distance > this.opt.dangerRadius * 3) {
-          continue;
-        }
-        const threat = this.analyzeCollisionThreat(ourSnake, snake);
+      for (const cp of collisionPoints) {
+        const threat = this.analyzeCollisionPointWithTrajectory(ourSnake, cp);
         if (threat) {
           threats.push(threat);
         }
@@ -568,24 +559,29 @@ The MIT License (MIT)
       const status = this.state.enabled ? "GOD MODE: ON" : "GOD MODE: OFF";
       ctx.fillText(status, 10, 70);
       if (!this.state.enabled) return;
-      const screenX = ourSnake.xx - window.view_xx;
-      const screenY = ourSnake.yy - window.view_yy;
+      const mapToCanvas2 = (point) => ({
+        x: window.mww2 + (point.x - window.view_xx) * window.gsc,
+        y: window.mhh2 + (point.y - window.view_yy) * window.gsc
+      });
+      const snakeScreen = mapToCanvas2({ x: ourSnake.xx, y: ourSnake.yy });
+      const scaledDangerRadius = this.opt.dangerRadius * window.gsc;
+      const scaledEmergencyRadius = this.opt.emergencyRadius * window.gsc;
       ctx.beginPath();
-      ctx.arc(screenX, screenY, this.opt.dangerRadius, 0, 2 * Math.PI);
+      ctx.arc(snakeScreen.x, snakeScreen.y, scaledDangerRadius, 0, 2 * Math.PI);
       ctx.strokeStyle = this.state.emergencyAvoidanceActive ? "rgba(255, 0, 0, 0.8)" : "rgba(255, 255, 0, 0.6)";
       ctx.lineWidth = 3;
       ctx.stroke();
       ctx.beginPath();
-      ctx.arc(screenX, screenY, this.opt.emergencyRadius, 0, 2 * Math.PI);
+      ctx.arc(snakeScreen.x, snakeScreen.y, scaledEmergencyRadius, 0, 2 * Math.PI);
       ctx.strokeStyle = "rgba(255, 0, 0, 0.9)";
       ctx.lineWidth = 2;
       ctx.stroke();
-      const rayLength = 150;
+      const rayLength = 150 * window.gsc;
       const ourAngle = ourSnake.ang;
-      const endX = screenX + Math.cos(ourAngle) * rayLength;
-      const endY = screenY + Math.sin(ourAngle) * rayLength;
+      const endX = snakeScreen.x + Math.cos(ourAngle) * rayLength;
+      const endY = snakeScreen.y + Math.sin(ourAngle) * rayLength;
       ctx.beginPath();
-      ctx.moveTo(screenX, screenY);
+      ctx.moveTo(snakeScreen.x, snakeScreen.y);
       ctx.lineTo(endX, endY);
       ctx.strokeStyle = "rgba(0, 255, 255, 0.7)";
       ctx.lineWidth = 2;
@@ -629,6 +625,18 @@ The MIT License (MIT)
       if (this.state.threatAnalyses.length > 0) {
         const maxThreat = this.state.threatAnalyses[0];
         ctx.fillText(`Max Threat: ${(maxThreat.threatLevel * 100).toFixed(0)}%`, 10, 150);
+        ctx.fillText(`Time to Collision: ${maxThreat.timeToCollision.toFixed(1)}f`, 10, 170);
+      }
+      if (window.slithers && ourSnake) {
+        const collisionPoints = this.getCollisionPointsLikeBoot(ourSnake);
+        ctx.fillText(`Collision Points: ${collisionPoints.length}`, 10, 190);
+        for (const cp of collisionPoints.slice(0, 5)) {
+          const cpScreen = mapToCanvas2({ x: cp.x, y: cp.y });
+          ctx.beginPath();
+          ctx.arc(cpScreen.x, cpScreen.y, 5, 0, 2 * Math.PI);
+          ctx.fillStyle = cp.type === 0 ? "rgba(255, 0, 0, 0.8)" : "rgba(255, 165, 0, 0.8)";
+          ctx.fill();
+        }
       }
     }
     getStats() {
