@@ -268,7 +268,6 @@ The MIT License (MIT)
         console.log("\u{1F527} No slithers array, skipping god mode");
         return false;
       }
-      console.log("\u{1F527} God Mode checkAndAssist() running - looking for threats...");
       const now = window.timeObj ? window.timeObj.now() : Date.now();
       if (now - this.lastControlTime < this.opt.controlCooldown) {
         return this.takingControl;
@@ -307,7 +306,12 @@ The MIT License (MIT)
         const headDistance = Math.sqrt((ourX - snake.xx) ** 2 + (ourY - snake.yy) ** 2);
         const angleDiff = Math.abs(ourAngle - enemyAngle);
         const angleMultiplier = this.opt.getAngleMultiplier(angleDiff);
-        const boostMultiplier = (ourIsBoosting ? this.opt.boostMultiplier : 1) * (enemyIsBoosting ? this.opt.boostMultiplier : 1);
+        let boostMultiplier = 1;
+        if (ourIsBoosting && enemyIsBoosting) {
+          boostMultiplier = 7;
+        } else if (ourIsBoosting || enemyIsBoosting) {
+          boostMultiplier = this.opt.boostMultiplier;
+        }
         const detectionDistance = this.opt.baseDetectionDistance * angleMultiplier * boostMultiplier;
         if (headDistance < detectionDistance && headDistance < closestDistance) {
           closest = {
@@ -423,13 +427,14 @@ The MIT License (MIT)
      */
     setMouseDirection(targetAngle) {
       if (!window.slither) return;
-      const mouseDistance = 200;
+      const mouseDistance = 100;
       const targetX = window.slither.xx + Math.cos(targetAngle) * mouseDistance;
       const targetY = window.slither.yy + Math.sin(targetAngle) * mouseDistance;
-      const canvasX = (targetX - window.view_xx) * window.gsc + window.canvas.width / 2;
-      const canvasY = (targetY - window.view_yy) * window.gsc + window.canvas.height / 2;
+      const canvasX = (targetX - window.view_xx) * window.gsc;
+      const canvasY = (targetY - window.view_yy) * window.gsc;
       window.xm = canvasX;
       window.ym = canvasY;
+      console.log(`\u{1F3AF} Setting mouse direction: angle=${(targetAngle * 180 / Math.PI).toFixed(0)}\xB0, xm=${canvasX.toFixed(0)}, ym=${canvasY.toFixed(0)}`);
     }
     /**
      * Visual debugging
@@ -442,16 +447,19 @@ The MIT License (MIT)
         console.log("\u{1F527} No canvas context for god mode visuals");
         return;
       }
+      if (!window.mc) {
+        console.log("\u{1F527} No main canvas for god mode visuals");
+        return;
+      }
       if (!window.slither) {
         console.log("\u{1F527} No slither for god mode visuals");
         return;
       }
-      console.log("\u{1F527} Drawing god mode visuals...");
       const ctx = window.ctx;
       const ourSnake = window.slither;
       const snakeScreen = {
-        x: (ourSnake.xx - window.view_xx) * window.gsc + window.canvas.width / 2,
-        y: (ourSnake.yy - window.view_yy) * window.gsc + window.canvas.height / 2
+        x: window.mc.width / 2 + (ourSnake.xx - window.view_xx) * window.gsc,
+        y: window.mc.height / 2 + (ourSnake.yy - window.view_yy) * window.gsc
       };
       const closest = this.findClosestObstacle(ourSnake);
       if (closest) {
@@ -463,8 +471,8 @@ The MIT License (MIT)
         ctx.arc(snakeScreen.x, snakeScreen.y, detectionRadius, 0, 2 * Math.PI);
         ctx.stroke();
         const obstacleScreen = {
-          x: (closest.x - window.view_xx) * window.gsc + window.canvas.width / 2,
-          y: (closest.y - window.view_yy) * window.gsc + window.canvas.height / 2
+          x: window.mc.width / 2 + (closest.x - window.view_xx) * window.gsc,
+          y: window.mc.height / 2 + (closest.y - window.view_yy) * window.gsc
         };
         ctx.fillStyle = prediction.willCollide ? "#ff0000" : "#00ff00";
         ctx.beginPath();
