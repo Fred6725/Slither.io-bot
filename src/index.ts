@@ -28,18 +28,17 @@ const init = () => {
 		original_oef();
 
 		// God Mode Assist - works independently of bot
-		if (window.playing && window.slither !== null) {
+		if (window.playing && window.ourSnake !== null) {
 			checkGodModeAssist();
 			
 			// Draw god mode visuals independently
-			const ctx = window.mc?.getContext("2d");
-			if (ctx && bot.isGodModeVisualsEnabled()) {
-				bot.drawGodModeVisuals(ctx, window.slither);
+			if (bot.isGodModeVisualsEnabled()) {
+				bot.drawGodModeVisuals();
 			}
 		}
 
 		// Bot behavior
-		if (window.playing && botEnabledState.val && window.slither !== null) {
+		if (window.playing && botEnabledState.val && window.ourSnake !== null) {
 			isBotRunning = true;
 			bot.go();
 		} else if (botEnabledState.val && isBotRunning) {
@@ -50,8 +49,8 @@ const init = () => {
 			}
 		}
 
-		if (window.slither !== null) {
-			lengthState.val = bot.getSnakeLength(window.slither);
+		if (window.ourSnake !== null) {
+			lengthState.val = bot.getSnakeLength(window.ourSnake);
 		}
 	};
 
