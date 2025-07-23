@@ -220,6 +220,9 @@ The MIT License (MIT)
     visualsEnabled = false;
     visualizer;
 
+    // Full control mode - like bot mode but user controls speed
+    fullControlMode = true; // Changed from frame-by-frame correction to full control
+
     // Collision detection parameters (will be adjusted dynamically)
     baseLookaheadDistance = 200;
     baseDangerZoneRadius = 120;
@@ -232,13 +235,10 @@ The MIT License (MIT)
     boostSpeedThreshold = 6.5;
     maxBoostSpeed = 12.0;
 
-    // Mouse input blending parameters
-    userInfluence = 0.1;
-    avoidanceInfluence = 0.3;
-    emergencyMode = false;
-    emergencyThreshold = 100;
-    smoothingEnabled = true;
-    dynamicBlending = true;
+    // Full control mode parameters
+    controlSmoothingFactor = 0.3;
+    lastControlAngle = 0;
+    controlActive = false;
 
     // Dynamic parameters (calculated each frame)
     lookaheadDistance = 200;
@@ -252,96 +252,9 @@ The MIT License (MIT)
 
     // Snake movement history for prediction
     snakeHistory = new Map();
-    lastMouseInput = { x: 0, y: 0 };
-    blendedOutput = { x: 0, y: 0 };
 
     constructor(visualizer) {
       this.visualizer = visualizer;
-      this.setupMouseInterception();
-    }
-
-    // Setup mouse input interception for blending
-    setupMouseInterception() {
-      let originalMouseMove = null;
-
-      const interceptMouseMove = (e) => {
-        this.lastMouseInput = { x: e.clientX, y: e.clientY };
-
-        if (this.enabled && this.avoidanceVector.x !== 0 && this.avoidanceVector.y !== 0) {
-          // Calculate blended input
-          const blendedInput = this.blendMouseInput(this.lastMouseInput, this.avoidanceVector);
-
-          // Override mouse position for collision avoidance
-          const overrideEvent = new MouseEvent('mousemove', {
-            clientX: blendedInput.x,
-            clientY: blendedInput.y,
-            bubbles: true,
-            cancelable: true
-          });
-
-          if (originalMouseMove) {
-            originalMouseMove.call(this, overrideEvent);
-          }
-        } else {
-          if (originalMouseMove) {
-            originalMouseMove.call(this, e);
-          }
-        }
-      };
-
-      const hookMouse = () => {
-        if (window.slither && document.body) {
-          const existingListeners = document.body.onmousemove;
-          if (existingListeners) {
-            originalMouseMove = existingListeners;
-          }
-          document.body.onmousemove = interceptMouseMove;
-          document.body.addEventListener('mousemove', interceptMouseMove, true);
-        } else {
-          setTimeout(hookMouse, 500);
-        }
-      };
-
-      hookMouse();
-    }
-
-    // Blend mouse input with collision avoidance
-    blendMouseInput(userInput, avoidanceVector) {
-      const closestThreat = this.getClosestThreatDistance();
-      this.emergencyMode = closestThreat < this.emergencyThreshold;
-
-      let userWeight = this.userInfluence;
-      let avoidanceWeight = this.avoidanceInfluence;
-
-      if (this.emergencyMode) {
-        userWeight = 0.2;
-        avoidanceWeight = 0.8;
-      }
-
-      const snake = window.slither;
-      if (!snake) return userInput;
-
-      const screenAvoidance = {
-        x: userInput.x + avoidanceVector.x * 50,
-        y: userInput.y + avoidanceVector.y * 50
-      };
-
-      const blended = {
-        x: userInput.x * userWeight + screenAvoidance.x * avoidanceWeight,
-        y: userInput.y * userWeight + screenAvoidance.y * avoidanceWeight
-      };
-
-      if (this.smoothingEnabled) {
-        const smoothingFactor = this.emergencyMode ? 0.3 : 0.15;
-        this.blendedOutput = {
-          x: this.blendedOutput.x + (blended.x - this.blendedOutput.x) * smoothingFactor,
-          y: this.blendedOutput.y + (blended.y - this.blendedOutput.y) * smoothingFactor
-        };
-      } else {
-        this.blendedOutput = blended;
-      }
-
-      return this.blendedOutput;
     }
 
     // Main collision avoidance update function
@@ -368,8 +281,8 @@ The MIT License (MIT)
         console.log(`Enhanced Collision Avoidance: ${this.dangerZones.length} dangers, closest: ${this.dangerZones[0]?.distance?.toFixed(0)}px, boost: ${isBoosting}`);
       }
 
-      // Calculate avoidance vector
-      const avoidanceAngle = this.calculateAvoidance(headPos, headAngle, snakeRadius);
+      // Calculate avoidance direction for full control mode
+      const avoidanceAngle = this.calculateFullControlAvoidance(headPos, headAngle, snakeRadius);
 
       // Apply visual debugging if enabled
       if (this.visualsEnabled) {
@@ -554,7 +467,7 @@ The MIT License (MIT)
         });
       }
 
-      // Check snake body collision
+      // Check snake body collision - mark dangerous body parts with orange dots
       const pts = targetSnake.pts;
       for (let i = 0; i < pts.length; i++) {
         const bodyPart = pts[i];
@@ -571,7 +484,8 @@ The MIT License (MIT)
             radius: safeDistance,
             approachAngle: approachAngle,
             dangerLevel: dangerLevel,
-            type: 'snake'
+            type: 'snake_body', // Mark as body part for orange dot visualization
+            bodyIndex: i
           });
         }
       }
@@ -634,12 +548,15 @@ The MIT License (MIT)
       return Math.min(1, distanceFactor * angleFactor * 2);
     }
 
-    // Calculate avoidance steering angle
-    calculateAvoidance(headPos, headAngle, snakeRadius) {
+    // Calculate avoidance for full control mode (like bot mode)
+    calculateFullControlAvoidance(headPos, headAngle, snakeRadius) {
       if (this.dangerZones.length === 0) {
-        this.lastCorrectionAngle = 0;
-        return 0;
+        this.controlActive = false;
+        this.lastControlAngle = 0;
+        return null; // No danger, user has full control
       }
+
+      this.controlActive = true;
 
       // Sort danger zones by danger level
       this.dangerZones.sort((a, b) => b.dangerLevel - a.dangerLevel);
@@ -647,66 +564,79 @@ The MIT License (MIT)
       // Check for critical collision (very close)
       const criticalDanger = this.dangerZones.find(d => d.distance < snakeRadius + 40);
       if (criticalDanger) {
-        // Emergency steering - take full control
-        const emergencyAngle = this.calculateEmergencyAvoidance(headPos, headAngle, criticalDanger);
-        this.lastCorrectionAngle = emergencyAngle;
-        console.log(`EMERGENCY AVOIDANCE: ${(emergencyAngle * 180 / Math.PI).toFixed(1)}°`);
+        // Emergency steering - take full control immediately
+        const emergencyAngle = this.calculateEmergencyDirection(headPos, headAngle, criticalDanger);
+        this.lastControlAngle = emergencyAngle;
+        console.log(`EMERGENCY CONTROL: ${(emergencyAngle * 180 / Math.PI).toFixed(1)}°`);
         return emergencyAngle;
       }
 
+      // Calculate optimal avoidance direction
+      const optimalDirection = this.calculateOptimalDirection(headPos, headAngle, snakeRadius);
+      
+      // Apply smoothing to direction changes
+      if (this.lastControlAngle !== 0) {
+        const angleDiff = this.angleDifference(optimalDirection, this.lastControlAngle);
+        this.lastControlAngle += angleDiff * this.controlSmoothingFactor;
+      } else {
+        this.lastControlAngle = optimalDirection;
+      }
+
+      return this.lastControlAngle;
+    }
+
+    // Calculate emergency direction for critical situations
+    calculateEmergencyDirection(headPos, headAngle, criticalDanger) {
+      const obstacleAngle = fastAtan2(criticalDanger.point.y - headPos.y, criticalDanger.point.x - headPos.x);
+
+      // Calculate perpendicular escape directions
+      const leftEscape = obstacleAngle + Math.PI / 2;
+      const rightEscape = obstacleAngle - Math.PI / 2;
+
+      // Choose the escape route that requires less turning from current heading
+      const leftDiff = Math.abs(this.angleDifference(leftEscape, headAngle));
+      const rightDiff = Math.abs(this.angleDifference(rightEscape, headAngle));
+
+      return leftDiff < rightDiff ? leftEscape : rightEscape;
+    }
+
+    // Calculate optimal direction considering all dangers
+    calculateOptimalDirection(headPos, headAngle, snakeRadius) {
       let totalAvoidanceX = 0;
       let totalAvoidanceY = 0;
       let totalWeight = 0;
 
       for (const danger of this.dangerZones) {
         const weight = danger.dangerLevel;
-        const avoidanceAngle = this.calculateOptimalAvoidanceAngle(headPos, headAngle, danger);
+        const avoidanceDirection = this.calculateSingleDangerAvoidance(headPos, headAngle, danger);
 
-        totalAvoidanceX += Math.cos(avoidanceAngle) * weight;
-        totalAvoidanceY += Math.sin(avoidanceAngle) * weight;
+        totalAvoidanceX += Math.cos(avoidanceDirection) * weight;
+        totalAvoidanceY += Math.sin(avoidanceDirection) * weight;
         totalWeight += weight;
       }
 
-      if (totalWeight === 0) return 0;
+      if (totalWeight === 0) return headAngle;
 
-      const avgAvoidanceAngle = fastAtan2(totalAvoidanceY, totalAvoidanceX);
-      let steeringAngle = this.angleDifference(avgAvoidanceAngle, headAngle);
-
-      // Apply smoothing and limits
-      steeringAngle = this.smoothSteering(steeringAngle);
-      steeringAngle = Math.max(-this.maxSteeringAngle, Math.min(this.maxSteeringAngle, steeringAngle));
-
-      this.lastCorrectionAngle = steeringAngle;
-      return steeringAngle;
+      // Calculate weighted average direction
+      const optimalDirection = fastAtan2(totalAvoidanceY, totalAvoidanceX);
+      
+      // Limit maximum turning angle for smoother movement
+      const maxTurn = Math.PI / 3; // 60 degrees max turn
+      let turnAmount = this.angleDifference(optimalDirection, headAngle);
+      turnAmount = Math.max(-maxTurn, Math.min(maxTurn, turnAmount));
+      
+      return headAngle + turnAmount;
     }
 
-    // Emergency avoidance for critical collisions
-    calculateEmergencyAvoidance(headPos, headAngle, criticalDanger) {
-      const obstacleAngle = fastAtan2(criticalDanger.point.y - headPos.y, criticalDanger.point.x - headPos.x);
-
-      // Calculate perpendicular escape angles
-      const leftEscape = obstacleAngle + Math.PI / 2;
-      const rightEscape = obstacleAngle - Math.PI / 2;
-
-      // Choose the escape route that requires less turning
-      const leftDiff = Math.abs(this.angleDifference(leftEscape, headAngle));
-      const rightDiff = Math.abs(this.angleDifference(rightEscape, headAngle));
-
-      const escapeAngle = leftDiff < rightDiff ? leftEscape : rightEscape;
-
-      // Return maximum steering toward escape angle
-      return this.angleDifference(escapeAngle, headAngle);
-    }
-
-    // Calculate optimal avoidance angle for specific danger
-    calculateOptimalAvoidanceAngle(headPos, headAngle, danger) {
+    // Calculate avoidance direction for a single danger
+    calculateSingleDangerAvoidance(headPos, headAngle, danger) {
       const obstacleAngle = fastAtan2(danger.point.y - headPos.y, danger.point.x - headPos.x);
 
       // Calculate the angle to steer AWAY from the obstacle
       const avoidanceAngle = obstacleAngle + Math.PI; // Point away from obstacle
 
-      // For right-angle approaches, steer perpendicular to obstacle
-      if (danger.approachAngle > Math.PI / 3) { // > 60 degrees
+      // For head-on approaches, steer perpendicular to obstacle
+      if (danger.approachAngle < Math.PI / 4) { // < 45 degrees approach
         const leftAngle = avoidanceAngle + Math.PI / 2;
         const rightAngle = avoidanceAngle - Math.PI / 2;
 
@@ -716,14 +646,8 @@ The MIT License (MIT)
 
         return leftDiff < rightDiff ? leftAngle : rightAngle;
       } else {
-        // For small angles, steer away from obstacle
-        const correctionMagnitude = Math.min(Math.PI / 4, danger.approachAngle * 3); // Max 45 degrees
-        const side = this.isLeft(headPos, {
-          x: headPos.x + Math.cos(headAngle),
-          y: headPos.y + Math.sin(headAngle)
-        }, danger.point) ? -1 : 1; // Reversed to steer away
-
-        return headAngle + (side * correctionMagnitude);
+        // For angled approaches, steer away smoothly
+        return avoidanceAngle;
       }
     }
 
@@ -741,34 +665,7 @@ The MIT License (MIT)
       return diff;
     }
 
-    // Apply smoothing to steering angle
-    smoothSteering(targetAngle) {
-      return this.lastCorrectionAngle +
-             (targetAngle - this.lastCorrectionAngle) * this.smoothingFactor;
-    }
 
-    // Get closest point on line segment
-    getClosestPointOnSegment(lineStart, lineEnd, segmentStart, segmentEnd) {
-      const A = lineStart.x - segmentStart.x;
-      const B = lineStart.y - segmentStart.y;
-      const C = lineEnd.x - lineStart.x;
-      const D = lineEnd.y - lineStart.y;
-      const E = segmentEnd.x - segmentStart.x;
-      const F = segmentEnd.y - segmentStart.y;
-
-      const dot = A * E + B * F;
-      const len_sq = E * E + F * F;
-
-      if (len_sq === 0) return segmentStart;
-
-      const param = dot / len_sq;
-      const clampedParam = Math.max(0, Math.min(1, param));
-
-      return {
-        x: segmentStart.x + clampedParam * E,
-        y: segmentStart.y + clampedParam * F
-      };
-    }
 
     // Draw debug visuals
     drawDebugVisuals(headPos, headAngle, snakeRadius) {
@@ -782,35 +679,46 @@ The MIT License (MIT)
 
       // Draw danger zones
       for (const danger of this.dangerZones) {
-        const color = danger.type === 'snake' ? 'red' : 'orange';
-        const alpha = danger.dangerLevel;
+        if (danger.type === 'snake_body') {
+          // Draw orange dots on dangerous snake body parts instead of red lines
+          this.visualizer.drawCircle(
+            { x: danger.point.x, y: danger.point.y, r: 8 },
+            "orange",
+            true, // filled
+            danger.dangerLevel
+          );
+        } else {
+          const color = danger.type === 'snake' || danger.type === 'moving_snake' ? 'red' : 'orange';
+          const alpha = danger.dangerLevel;
 
-        this.visualizer.drawCircle(
-          { x: danger.point.x, y: danger.point.y, r: danger.radius },
-          color,
-          false,
-          alpha
-        );
-
-        // Draw approach angle line
-        this.visualizer.drawLine(headPos, danger.point, color, 1);
+          this.visualizer.drawCircle(
+            { x: danger.point.x, y: danger.point.y, r: danger.radius },
+            color,
+            false,
+            alpha
+          );
+        }
       }
 
-      // Draw avoidance vector
-      if (this.lastCorrectionAngle !== 0) {
-        const avoidancePoint = {
-          x: headPos.x + Math.cos(headAngle + this.lastCorrectionAngle) * 100,
-          y: headPos.y + Math.sin(headAngle + this.lastCorrectionAngle) * 100
+      // Draw current control direction (if in full control mode)
+      if (this.controlActive && this.lastControlAngle !== 0) {
+        const controlPoint = {
+          x: headPos.x + Math.cos(this.lastControlAngle) * 150,
+          y: headPos.y + Math.sin(this.lastControlAngle) * 150
         };
-        this.visualizer.drawLine(headPos, avoidancePoint, "lime", 3);
+        this.visualizer.drawLine(headPos, controlPoint, "lime", 4);
+        
+        // Draw control indicator
+        this.visualizer.drawCircle(
+          { x: controlPoint.x, y: controlPoint.y, r: 10 },
+          "lime",
+          true,
+          0.8
+        );
       }
     }
 
-    // Get closest threat distance for emergency mode
-    getClosestThreatDistance() {
-      if (this.dangerZones.length === 0) return Infinity;
-      return Math.min(...this.dangerZones.map(zone => zone.distance));
-    }
+
 
     // Toggle collision avoidance
     toggle() {
@@ -2053,9 +1961,6 @@ The MIT License (MIT)
   var collisionAvoidanceState = state2(false);
   var collisionVisualsState = state2(false);
   var enhancedCollisionState = state2(false);
-  var movingTargetPredictionState = state2(true);
-  var mouseBlendingState = state2(true);
-  var userInfluenceState = state2(10);
   var fpsState = state2(0);
   var pingState = state2("0ms");
   var serverState = state2("[0:0:0:0:0:0:0:0]:444");
@@ -2164,28 +2069,10 @@ The MIT License (MIT)
         )
       ]),
       div({ class: "pref-overlay__item" }, [
-        span({ class: "pref-overlay__label" }, "[M] Moving Target Prediction: "),
-        span(
-          { class: getToggleClass(movingTargetPredictionState) },
-          getToggleValue(movingTargetPredictionState)
-        )
-      ]),
-      div({ class: "pref-overlay__item" }, [
-        span({ class: "pref-overlay__label" }, "[B] Mouse Blending: "),
-        span(
-          { class: getToggleClass(mouseBlendingState) },
-          getToggleValue(mouseBlendingState)
-        )
-      ]),
-      div({ class: "pref-overlay__item" }, [
-        span({ class: "pref-overlay__label" }, "[U] User Control: "),
-        span({ class: "pref-overlay__value" }, () => userInfluenceState.val + "%")
-      ]),
-      div({ class: "pref-overlay__item" }, [
-        span({ class: "pref-overlay__label" }, "Emergency Mode: "),
+        span({ class: "pref-overlay__label" }, "Control Mode: "),
         span(
           { class: "pref-overlay__value" },
-          () => collisionAvoidance.emergencyMode ? "ACTIVE" : "Normal"
+          () => collisionAvoidance.controlActive ? "FULL CONTROL" : "User Control"
         )
       ]),
       div({ class: "pref-overlay__item" }, [
@@ -2321,24 +2208,6 @@ The MIT License (MIT)
     e: () => {
       enhancedCollisionState.val = !enhancedCollisionState.val;
       collisionAvoidance.enabled = enhancedCollisionState.val;
-    },
-    m: () => {
-      movingTargetPredictionState.val = !movingTargetPredictionState.val;
-      collisionAvoidance.predictionEnabled = movingTargetPredictionState.val;
-    },
-    b: () => {
-      mouseBlendingState.val = !mouseBlendingState.val;
-      collisionAvoidance.dynamicBlending = mouseBlendingState.val;
-    },
-    u: () => {
-      userInfluenceState.val = Math.min(90, userInfluenceState.val + 10);
-      collisionAvoidance.userInfluence = userInfluenceState.val / 100;
-      collisionAvoidance.avoidanceInfluence = 1 - collisionAvoidance.userInfluence;
-    },
-    j: () => {
-      userInfluenceState.val = Math.max(10, userInfluenceState.val - 10);
-      collisionAvoidance.userInfluence = userInfluenceState.val / 100;
-      collisionAvoidance.avoidanceInfluence = 1 - collisionAvoidance.userInfluence;
     }
   };
   var initEventListeners = () => {
@@ -2405,24 +2274,23 @@ The MIT License (MIT)
         }
       }
 
-      // Run collision avoidance when not in bot mode
+      // Run collision avoidance when not in bot mode (full control mode)
       if (window.playing && !botEnabledState.val && collisionAvoidance.enabled && window.slither) {
-        const avoidanceResult = collisionAvoidance.update(
+        const avoidanceDirection = collisionAvoidance.update(
           window.slither,
           window.slithers,
           window.grd
         );
 
-        if (avoidanceResult !== null && Math.abs(avoidanceResult) > 0.1) {
-          // Apply collision avoidance steering
-          const newAngle = window.slither.ang + avoidanceResult;
-          const newX = window.slither.xx + Math.cos(newAngle) * 100;
-          const newY = window.slither.yy + Math.sin(newAngle) * 100;
+        if (avoidanceDirection !== null) {
+          // Full control mode - set exact direction, user controls speed only
+          const newX = window.slither.xx + Math.cos(avoidanceDirection) * 100;
+          const newY = window.slither.yy + Math.sin(avoidanceDirection) * 100;
 
           window.xm = newX - window.view_xx;
           window.ym = newY - window.view_yy;
 
-          console.log(`Collision Avoidance: Steering by ${(avoidanceResult * 180 / Math.PI).toFixed(1)}°`);
+          console.log(`Collision Avoidance Full Control: Direction ${(avoidanceDirection * 180 / Math.PI).toFixed(1)}°`);
         }
       }
 
