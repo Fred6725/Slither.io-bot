@@ -313,12 +313,12 @@ export class GodModeAssist {
 	 * Set mouse direction for steering
 	 */
 	private setMouseDirection(targetAngle: number): void {
-		if (!window.ourSnake) return;
+		if (!window.slither) return;
 
 		// Convert to screen coordinates for mouse positioning
 		const mouseDistance = 200; // Distance from snake center
-		const targetX = window.ourSnake.xx + Math.cos(targetAngle) * mouseDistance;
-		const targetY = window.ourSnake.yy + Math.sin(targetAngle) * mouseDistance;
+		const targetX = window.slither.xx + Math.cos(targetAngle) * mouseDistance;
+		const targetY = window.slither.yy + Math.sin(targetAngle) * mouseDistance;
 
 		// Convert to canvas coordinates
 		const canvasX = (targetX - window.view_xx) * window.gsc + window.canvas.width / 2;
@@ -343,15 +343,15 @@ export class GodModeAssist {
 			return;
 		}
 		
-		if (!window.ourSnake) {
-			console.log("🔧 No ourSnake for god mode visuals");
+		if (!window.slither) {
+			console.log("🔧 No slither for god mode visuals");
 			return;
 		}
 		
 		console.log("🔧 Drawing god mode visuals...");
 
 		const ctx = window.ctx;
-		const ourSnake = window.ourSnake;
+		const ourSnake = window.slither;
 
 		// Map our snake to canvas
 		const snakeScreen = {

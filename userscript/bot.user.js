@@ -422,10 +422,10 @@ The MIT License (MIT)
      * Set mouse direction for steering
      */
     setMouseDirection(targetAngle) {
-      if (!window.ourSnake) return;
+      if (!window.slither) return;
       const mouseDistance = 200;
-      const targetX = window.ourSnake.xx + Math.cos(targetAngle) * mouseDistance;
-      const targetY = window.ourSnake.yy + Math.sin(targetAngle) * mouseDistance;
+      const targetX = window.slither.xx + Math.cos(targetAngle) * mouseDistance;
+      const targetY = window.slither.yy + Math.sin(targetAngle) * mouseDistance;
       const canvasX = (targetX - window.view_xx) * window.gsc + window.canvas.width / 2;
       const canvasY = (targetY - window.view_yy) * window.gsc + window.canvas.height / 2;
       window.xm = canvasX;
@@ -442,13 +442,13 @@ The MIT License (MIT)
         console.log("\u{1F527} No canvas context for god mode visuals");
         return;
       }
-      if (!window.ourSnake) {
-        console.log("\u{1F527} No ourSnake for god mode visuals");
+      if (!window.slither) {
+        console.log("\u{1F527} No slither for god mode visuals");
         return;
       }
       console.log("\u{1F527} Drawing god mode visuals...");
       const ctx = window.ctx;
-      const ourSnake = window.ourSnake;
+      const ourSnake = window.slither;
       const snakeScreen = {
         x: (ourSnake.xx - window.view_xx) * window.gsc + window.canvas.width / 2,
         y: (ourSnake.yy - window.view_yy) * window.gsc + window.canvas.height / 2
@@ -580,8 +580,8 @@ The MIT License (MIT)
      * Checks if god mode assist should take control (independent of bot)
      */
     checkGodModeAssist() {
-      if (!window.ourSnake || !window.playing) return false;
-      return godModeAssist.checkAndAssist(window.ourSnake);
+      if (!window.slither || !window.playing) return false;
+      return godModeAssist.checkAndAssist(window.slither);
     }
     /**
      * Draws god mode visuals independently
@@ -2047,13 +2047,13 @@ The MIT License (MIT)
         fpsState.val = window.fps;
       }
       original_oef();
-      if (window.playing && window.ourSnake !== null) {
+      if (window.playing && window.slither !== null) {
         checkGodModeAssist();
         if (bot.isGodModeVisualsEnabled()) {
           bot.drawGodModeVisuals();
         }
       }
-      if (window.playing && botEnabledState.val && window.ourSnake !== null) {
+      if (window.playing && botEnabledState.val && window.slither !== null) {
         isBotRunning = true;
         bot.go();
       } else if (botEnabledState.val && isBotRunning) {
@@ -2062,8 +2062,8 @@ The MIT License (MIT)
           window.connect();
         }
       }
-      if (window.ourSnake !== null) {
-        lengthState.val = bot.getSnakeLength(window.ourSnake);
+      if (window.slither !== null) {
+        lengthState.val = bot.getSnakeLength(window.slither);
       }
     };
     window.connect = () => {
