@@ -20,15 +20,21 @@ const toggleVisualizer = () => {
 };
 
 const toggleGodMode = () => {
+	console.log("🔧 toggleGodMode() called");
+	const oldVal = godModeEnabledState.val;
 	godModeEnabledState.val = !godModeEnabledState.val;
+	console.log(`🔧 God Mode state: ${oldVal} -> ${godModeEnabledState.val}`);
 	bot.godModeEnabled(godModeEnabledState.val);
-	console.log("God Mode Assist:", godModeEnabledState.val ? "ENABLED" : "DISABLED");
+	console.log("🔥 God Mode Assist:", godModeEnabledState.val ? "ENABLED" : "DISABLED");
 };
 
 const toggleGodModeVisuals = () => {
+	console.log("🔧 toggleGodModeVisuals() called");
+	const oldVal = godModeVisualsState.val;
 	godModeVisualsState.val = !godModeVisualsState.val;
+	console.log(`🔧 God Mode Visuals state: ${oldVal} -> ${godModeVisualsState.val}`);
 	bot.godModeVisualsEnabled(godModeVisualsState.val);
-	console.log("God Mode Visuals:", godModeVisualsState.val ? "ENABLED" : "DISABLED");
+	console.log("👁️ God Mode Visuals:", godModeVisualsState.val ? "ENABLED" : "DISABLED");
 };
 
 const increaseRadiusMult = () => {
@@ -140,8 +146,13 @@ export const initEventListeners = () => {
 
 	function handleKeydown(e: KeyboardEvent) {
 		const key = e.key.toLowerCase();
-		console.log(key);
-		keyMap[key]?.();
+		console.log(`🔧 Key pressed: '${key}'`);
+		if (keyMap[key]) {
+			console.log(`🔧 Executing function for key: '${key}'`);
+			keyMap[key]();
+		} else {
+			console.log(`🔧 No function mapped for key: '${key}'`);
+		}
 	}
 
 	function handleMousedown(e: MouseEvent) {

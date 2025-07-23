@@ -83,9 +83,22 @@ export class GodModeAssist {
 	 * Main assist function - check for collision and take control if needed
 	 */
 	public checkAndAssist(ourSnake: ISlither): boolean {
-		if (!this.enabled || !ourSnake || !window.slithers) {
+		if (!this.enabled) {
+			// console.log("🔧 God Mode disabled, skipping");
 			return false;
 		}
+		
+		if (!ourSnake) {
+			console.log("🔧 No ourSnake, skipping god mode");
+			return false;
+		}
+		
+		if (!window.slithers) {
+			console.log("🔧 No slithers array, skipping god mode");
+			return false;
+		}
+		
+		console.log("🔧 God Mode checkAndAssist() running - looking for threats...");
 
 		// Cooldown check
 		const now = window.timeObj ? window.timeObj.now() : Date.now();
@@ -320,7 +333,22 @@ export class GodModeAssist {
 	 * Visual debugging
 	 */
 	public drawVisuals(): void {
-		if (!this.visualsEnabled || !window.ctx || !window.ourSnake) return;
+		if (!this.visualsEnabled) {
+			// console.log("🔧 God Mode visuals disabled");
+			return;
+		}
+		
+		if (!window.ctx) {
+			console.log("🔧 No canvas context for god mode visuals");
+			return;
+		}
+		
+		if (!window.ourSnake) {
+			console.log("🔧 No ourSnake for god mode visuals");
+			return;
+		}
+		
+		console.log("🔧 Drawing god mode visuals...");
 
 		const ctx = window.ctx;
 		const ourSnake = window.ourSnake;
