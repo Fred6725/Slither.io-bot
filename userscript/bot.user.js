@@ -257,9 +257,18 @@ The MIT License (MIT)
      * Main assist function - check for collision and take control if needed
      */
     checkAndAssist(ourSnake) {
-      if (!this.enabled || !ourSnake || !window.slithers) {
+      if (!this.enabled) {
         return false;
       }
+      if (!ourSnake) {
+        console.log("\u{1F527} No ourSnake, skipping god mode");
+        return false;
+      }
+      if (!window.slithers) {
+        console.log("\u{1F527} No slithers array, skipping god mode");
+        return false;
+      }
+      console.log("\u{1F527} God Mode checkAndAssist() running - looking for threats...");
       const now = window.timeObj ? window.timeObj.now() : Date.now();
       if (now - this.lastControlTime < this.opt.controlCooldown) {
         return this.takingControl;
@@ -426,7 +435,18 @@ The MIT License (MIT)
      * Visual debugging
      */
     drawVisuals() {
-      if (!this.visualsEnabled || !window.ctx || !window.ourSnake) return;
+      if (!this.visualsEnabled) {
+        return;
+      }
+      if (!window.ctx) {
+        console.log("\u{1F527} No canvas context for god mode visuals");
+        return;
+      }
+      if (!window.ourSnake) {
+        console.log("\u{1F527} No ourSnake for god mode visuals");
+        return;
+      }
+      console.log("\u{1F527} Drawing god mode visuals...");
       const ctx = window.ctx;
       const ourSnake = window.ourSnake;
       const snakeScreen = {
@@ -1867,14 +1887,20 @@ The MIT License (MIT)
     bot.visualizeEnabled(visualizeState.val);
   };
   var toggleGodMode = () => {
+    console.log("\u{1F527} toggleGodMode() called");
+    const oldVal = godModeEnabledState.val;
     godModeEnabledState.val = !godModeEnabledState.val;
+    console.log(`\u{1F527} God Mode state: ${oldVal} -> ${godModeEnabledState.val}`);
     bot.godModeEnabled(godModeEnabledState.val);
-    console.log("God Mode Assist:", godModeEnabledState.val ? "ENABLED" : "DISABLED");
+    console.log("\u{1F525} God Mode Assist:", godModeEnabledState.val ? "ENABLED" : "DISABLED");
   };
   var toggleGodModeVisuals = () => {
+    console.log("\u{1F527} toggleGodModeVisuals() called");
+    const oldVal = godModeVisualsState.val;
     godModeVisualsState.val = !godModeVisualsState.val;
+    console.log(`\u{1F527} God Mode Visuals state: ${oldVal} -> ${godModeVisualsState.val}`);
     bot.godModeVisualsEnabled(godModeVisualsState.val);
-    console.log("God Mode Visuals:", godModeVisualsState.val ? "ENABLED" : "DISABLED");
+    console.log("\u{1F441}\uFE0F God Mode Visuals:", godModeVisualsState.val ? "ENABLED" : "DISABLED");
   };
   var increaseRadiusMult = () => {
     bot.opt.radiusMult = Math.min(bot.opt.radiusMult + 1, 30);
@@ -1969,8 +1995,13 @@ The MIT License (MIT)
     });
     function handleKeydown(e) {
       const key = e.key.toLowerCase();
-      console.log(key);
-      keyMap[key]?.();
+      console.log(`\u{1F527} Key pressed: '${key}'`);
+      if (keyMap[key]) {
+        console.log(`\u{1F527} Executing function for key: '${key}'`);
+        keyMap[key]();
+      } else {
+        console.log(`\u{1F527} No function mapped for key: '${key}'`);
+      }
     }
     function handleMousedown(e) {
       if (window.playing) {
