@@ -104,10 +104,12 @@ export class Bot {
 
 	public godModeEnabled(enabled: boolean): void {
 		godModeAssist.setEnabled(enabled);
+		console.log(`🔥 GOD MODE ASSIST: ${enabled ? 'ENABLED' : 'DISABLED'}`);
 	}
 
 	public godModeVisualsEnabled(enabled: boolean): void {
 		godModeAssist.setVisualsEnabled(enabled);
+		console.log(`👁️ GOD MODE VISUALS: ${enabled ? 'ENABLED' : 'DISABLED'}`);
 	}
 
 	public isGodModeEnabled(): boolean {
@@ -118,23 +120,19 @@ export class Bot {
 		return godModeAssist.isVisualsEnabled();
 	}
 
-	public getGodModeStats() {
-		return godModeAssist.getStats();
-	}
-
 	/**
 	 * Checks if god mode assist should take control (independent of bot)
 	 */
 	public checkGodModeAssist(): boolean {
-		if (!window.slither || !window.playing) return false;
-		return godModeAssist.checkAndAssist(window.slither);
+		if (!window.ourSnake || !window.playing) return false;
+		return godModeAssist.checkAndAssist(window.ourSnake);
 	}
 
 	/**
 	 * Draws god mode visuals independently
 	 */
-	public drawGodModeVisuals(ctx: CanvasRenderingContext2D, ourSnake: ISlither): void {
-		godModeAssist.drawVisuals(ctx, ourSnake);
+	public drawGodModeVisuals(): void {
+		godModeAssist.drawVisuals();
 	}
 
 	public getSnakeLength(sk: ISlither): number {
