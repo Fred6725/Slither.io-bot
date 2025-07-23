@@ -98,7 +98,7 @@ export class GodModeAssist {
 			return false;
 		}
 		
-		console.log("🔧 God Mode checkAndAssist() running - looking for threats...");
+		// console.log("🔧 God Mode checkAndAssist() running - looking for threats...");
 
 		// Cooldown check
 		const now = window.timeObj ? window.timeObj.now() : Date.now();
@@ -154,8 +154,15 @@ export class GodModeAssist {
 			// Calculate systematic detection distance
 			const angleDiff = Math.abs(ourAngle - enemyAngle);
 			const angleMultiplier = this.opt.getAngleMultiplier(angleDiff);
-			const boostMultiplier = (ourIsBoosting ? this.opt.boostMultiplier : 1) * 
-									(enemyIsBoosting ? this.opt.boostMultiplier : 1);
+			
+			// Boost multiplier: our boost OR enemy boost = 3.5x, both = 7x max
+			let boostMultiplier = 1;
+			if (ourIsBoosting && enemyIsBoosting) {
+				boostMultiplier = 7; // Both boosting - worst case
+			} else if (ourIsBoosting || enemyIsBoosting) {
+				boostMultiplier = this.opt.boostMultiplier; // One boosting
+			}
+			
 			const detectionDistance = this.opt.baseDetectionDistance * angleMultiplier * boostMultiplier;
 
 			if (headDistance < detectionDistance && headDistance < closestDistance) {
@@ -316,17 +323,19 @@ export class GodModeAssist {
 		if (!window.slither) return;
 
 		// Convert to screen coordinates for mouse positioning
-		const mouseDistance = 200; // Distance from snake center
+		const mouseDistance = 100; // Distance from snake center
 		const targetX = window.slither.xx + Math.cos(targetAngle) * mouseDistance;
 		const targetY = window.slither.yy + Math.sin(targetAngle) * mouseDistance;
 
-		// Convert to canvas coordinates
-		const canvasX = (targetX - window.view_xx) * window.gsc + window.canvas.width / 2;
-		const canvasY = (targetY - window.view_yy) * window.gsc + window.canvas.height / 2;
+		// Convert to canvas coordinates using the game's coordinate system
+		const canvasX = (targetX - window.view_xx) * window.gsc;
+		const canvasY = (targetY - window.view_yy) * window.gsc;
 
-		// Set mouse position
+		// Set mouse position relative to view
 		window.xm = canvasX;
 		window.ym = canvasY;
+		
+		console.log(`🎯 Setting mouse direction: angle=${(targetAngle * 180 / Math.PI).toFixed(0)}°, xm=${canvasX.toFixed(0)}, ym=${canvasY.toFixed(0)}`);
 	}
 
 	/**
@@ -343,20 +352,25 @@ export class GodModeAssist {
 			return;
 		}
 		
+		if (!window.mc) {
+			console.log("🔧 No main canvas for god mode visuals");
+			return;
+		}
+		
 		if (!window.slither) {
 			console.log("🔧 No slither for god mode visuals");
 			return;
 		}
 		
-		console.log("🔧 Drawing god mode visuals...");
+		// console.log("🔧 Drawing god mode visuals...");
 
 		const ctx = window.ctx;
 		const ourSnake = window.slither;
 
-		// Map our snake to canvas
+		// Map our snake to canvas using game's coordinate system
 		const snakeScreen = {
-			x: (ourSnake.xx - window.view_xx) * window.gsc + window.canvas.width / 2,
-			y: (ourSnake.yy - window.view_yy) * window.gsc + window.canvas.height / 2
+			x: window.mc.width / 2 + (ourSnake.xx - window.view_xx) * window.gsc,
+			y: window.mc.height / 2 + (ourSnake.yy - window.view_yy) * window.gsc
 		};
 
 		// Find closest obstacle for display
@@ -374,8 +388,8 @@ export class GodModeAssist {
 
 			// Draw closest obstacle
 			const obstacleScreen = {
-				x: (closest.x - window.view_xx) * window.gsc + window.canvas.width / 2,
-				y: (closest.y - window.view_yy) * window.gsc + window.canvas.height / 2
+				x: window.mc.width / 2 + (closest.x - window.view_xx) * window.gsc,
+				y: window.mc.height / 2 + (closest.y - window.view_yy) * window.gsc
 			};
 			
 			ctx.fillStyle = prediction.willCollide ? '#ff0000' : '#00ff00';
