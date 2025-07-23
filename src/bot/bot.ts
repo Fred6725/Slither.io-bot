@@ -124,8 +124,8 @@ export class Bot {
 	 * Checks if god mode assist should take control (independent of bot)
 	 */
 	public checkGodModeAssist(): boolean {
-		if (!window.ourSnake || !window.playing) return false;
-		return godModeAssist.checkAndAssist(window.ourSnake);
+		if (!window.slither || !window.playing) return false;
+		return godModeAssist.checkAndAssist(window.slither);
 	}
 
 	/**
