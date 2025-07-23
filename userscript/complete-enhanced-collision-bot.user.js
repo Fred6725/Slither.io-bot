@@ -589,9 +589,10 @@ The MIT License (MIT)
     calculateEmergencyDirection(headPos, headAngle, criticalDanger) {
       const obstacleAngle = fastAtan2(criticalDanger.point.y - headPos.y, criticalDanger.point.x - headPos.x);
 
-      // Calculate perpendicular escape directions
-      const leftEscape = obstacleAngle + Math.PI / 2;
-      const rightEscape = obstacleAngle - Math.PI / 2;
+      // Calculate tangential escape directions (30-45 degrees from obstacle)
+      const escapeAngle = Math.PI / 6; // 30 degrees for smoother escape
+      const leftEscape = obstacleAngle + Math.PI / 2 + escapeAngle;
+      const rightEscape = obstacleAngle - Math.PI / 2 - escapeAngle;
 
       // Choose the escape route that requires less turning from current heading
       const leftDiff = Math.abs(this.angleDifference(leftEscape, headAngle));
@@ -620,35 +621,40 @@ The MIT License (MIT)
       // Calculate weighted average direction
       const optimalDirection = fastAtan2(totalAvoidanceY, totalAvoidanceX);
       
-      // Limit maximum turning angle for smoother movement
-      const maxTurn = Math.PI / 3; // 60 degrees max turn
-      let turnAmount = this.angleDifference(optimalDirection, headAngle);
-      turnAmount = Math.max(-maxTurn, Math.min(maxTurn, turnAmount));
-      
-      return headAngle + turnAmount;
+             // Limit maximum turning angle to prevent U-turns and over-correction
+       const maxTurn = Math.PI / 4; // 45 degrees max turn per frame
+       let turnAmount = this.angleDifference(optimalDirection, headAngle);
+       turnAmount = Math.max(-maxTurn, Math.min(maxTurn, turnAmount));
+       
+       return headAngle + turnAmount;
     }
 
     // Calculate avoidance direction for a single danger
     calculateSingleDangerAvoidance(headPos, headAngle, danger) {
       const obstacleAngle = fastAtan2(danger.point.y - headPos.y, danger.point.x - headPos.x);
 
-      // Calculate the angle to steer AWAY from the obstacle
-      const avoidanceAngle = obstacleAngle + Math.PI; // Point away from obstacle
+      // Calculate tangential directions (parallel to obstacle + slight divergence)
+      const tangentAngle = obstacleAngle + Math.PI / 2; // Perpendicular to obstacle direction
+      const divergenceAngle = Math.PI / 8; // 22.5 degrees slight divergence
+      
+      const leftTangent = tangentAngle + divergenceAngle;
+      const rightTangent = tangentAngle - divergenceAngle;
 
-      // For head-on approaches, steer perpendicular to obstacle
-      if (danger.approachAngle < Math.PI / 4) { // < 45 degrees approach
-        const leftAngle = avoidanceAngle + Math.PI / 2;
-        const rightAngle = avoidanceAngle - Math.PI / 2;
+      // Choose the tangent direction that requires less turning from current heading
+      const leftDiff = Math.abs(this.angleDifference(leftTangent, headAngle));
+      const rightDiff = Math.abs(this.angleDifference(rightTangent, headAngle));
 
-        // Choose the direction that requires less turning
-        const leftDiff = Math.abs(this.angleDifference(leftAngle, headAngle));
-        const rightDiff = Math.abs(this.angleDifference(rightAngle, headAngle));
-
-        return leftDiff < rightDiff ? leftAngle : rightAngle;
-      } else {
-        // For angled approaches, steer away smoothly
-        return avoidanceAngle;
+      // For very close approaches, add more divergence to ensure safety
+      if (danger.distance < danger.radius * 1.5) {
+        const extraDivergence = Math.PI / 6; // 30 degrees for closer obstacles
+        if (leftDiff < rightDiff) {
+          return leftTangent + extraDivergence;
+        } else {
+          return rightTangent - extraDivergence;
+        }
       }
+
+      return leftDiff < rightDiff ? leftTangent : rightTangent;
     }
 
     // Check if point is to the left of the line
