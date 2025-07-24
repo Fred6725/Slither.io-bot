@@ -622,7 +622,7 @@ The MIT License (MIT)
       const optimalDirection = fastAtan2(totalAvoidanceY, totalAvoidanceX);
       
              // Limit maximum turning angle to prevent U-turns and over-correction
-       const maxTurn = Math.PI / 4; // 45 degrees max turn per frame
+       const maxTurn = Math.PI / 3; // 60 degrees max turn per frame
        let turnAmount = this.angleDifference(optimalDirection, headAngle);
        turnAmount = Math.max(-maxTurn, Math.min(maxTurn, turnAmount));
        
@@ -631,30 +631,70 @@ The MIT License (MIT)
 
     // Calculate avoidance direction for a single danger
     calculateSingleDangerAvoidance(headPos, headAngle, danger) {
-      const obstacleAngle = fastAtan2(danger.point.y - headPos.y, danger.point.x - headPos.x);
-
-      // Calculate tangential directions (parallel to obstacle + slight divergence)
-      const tangentAngle = obstacleAngle + Math.PI / 2; // Perpendicular to obstacle direction
-      const divergenceAngle = Math.PI / 8; // 22.5 degrees slight divergence
+      // Get the approach direction of the threat (where it's coming FROM)
+      let approachAngle;
       
-      const leftTangent = tangentAngle + divergenceAngle;
-      const rightTangent = tangentAngle - divergenceAngle;
-
-      // Choose the tangent direction that requires less turning from current heading
-      const leftDiff = Math.abs(this.angleDifference(leftTangent, headAngle));
-      const rightDiff = Math.abs(this.angleDifference(rightTangent, headAngle));
-
-      // For very close approaches, add more divergence to ensure safety
-      if (danger.distance < danger.radius * 1.5) {
-        const extraDivergence = Math.PI / 6; // 30 degrees for closer obstacles
-        if (leftDiff < rightDiff) {
-          return leftTangent + extraDivergence;
+      if (danger.type === 'moving_snake' || danger.type === 'snake') {
+        // For moving snakes, use their movement direction
+        const snake = window.slithers.find(s => s.id === danger.snakeId);
+        if (snake && snake.ang !== undefined) {
+          // The approach angle is the direction the enemy snake is moving
+          approachAngle = snake.ang;
         } else {
-          return rightTangent - extraDivergence;
+          // Fallback: calculate approach from relative position
+          const obstacleAngle = fastAtan2(danger.point.y - headPos.y, danger.point.x - headPos.x);
+          approachAngle = obstacleAngle + Math.PI; // Coming from opposite direction
+        }
+      } else {
+        // For static obstacles (borders, body parts), use position-based approach
+        const obstacleAngle = fastAtan2(danger.point.y - headPos.y, danger.point.x - headPos.x);
+        approachAngle = obstacleAngle + Math.PI; // Coming from opposite direction
+      }
+
+      // Calculate the relative approach angle compared to our heading
+      let relativeApproachAngle = this.angleDifference(approachAngle, headAngle);
+      if (relativeApproachAngle < 0) relativeApproachAngle += 2 * Math.PI; // Normalize to 0-2π
+
+      // Determine escape direction based on approach quadrant
+      let shouldEscapeLeft;
+      
+      if (relativeApproachAngle >= 0 && relativeApproachAngle < Math.PI / 2) {
+        // Threat coming from front-left (0° to 90°) -> Escape LEFT
+        shouldEscapeLeft = true;
+      } else if (relativeApproachAngle >= Math.PI / 2 && relativeApproachAngle < Math.PI) {
+        // Threat coming from front-right (90° to 180°) -> Escape RIGHT
+        shouldEscapeLeft = false;
+      } else if (relativeApproachAngle >= Math.PI && relativeApproachAngle < 3 * Math.PI / 2) {
+        // Threat coming from rear-left (180° to 270°) -> Escape LEFT
+        shouldEscapeLeft = true;
+      } else {
+        // Threat coming from rear-right (270° to 360°) -> Escape RIGHT
+        shouldEscapeLeft = false;
+      }
+
+      // Calculate escape direction perpendicular to our current heading
+      const escapeLeft = headAngle - Math.PI / 2; // Turn left from current heading
+      const escapeRight = headAngle + Math.PI / 2; // Turn right from current heading
+      
+      // Add slight forward bias to avoid pure perpendicular movement
+      const forwardBias = Math.PI / 8; // 22.5 degrees forward bias
+      const leftEscape = escapeLeft + forwardBias;
+      const rightEscape = escapeRight - forwardBias;
+
+      // Choose escape direction based on tactical logic
+      let chosenDirection = shouldEscapeLeft ? leftEscape : rightEscape;
+
+      // For very close approaches, add more evasive angle
+      if (danger.distance < danger.radius * 1.5) {
+        const extraEvasion = Math.PI / 6; // 30 degrees more evasive
+        if (shouldEscapeLeft) {
+          chosenDirection = leftEscape - extraEvasion; // Turn more left
+        } else {
+          chosenDirection = rightEscape + extraEvasion; // Turn more right
         }
       }
 
-      return leftDiff < rightDiff ? leftTangent : rightTangent;
+      return chosenDirection;
     }
 
     // Check if point is to the left of the line
