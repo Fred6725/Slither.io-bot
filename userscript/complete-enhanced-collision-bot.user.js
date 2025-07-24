@@ -321,24 +321,13 @@ The MIT License (MIT)
       return Math.max(30, turnRadius); // Minimum turn radius of 30 pixels
     }
 
-    // Get snake length (simplified version)
+    // Get snake length (reuse from bot)
     getSnakeLength(snake) {
-      if (!snake) {
+      if (!snake || snake.sct < 0 || snake.fam < 0 || snake.rsc < 0) {
         return 0;
       }
-      
-      // Try the complex calculation first
-      try {
-        if (snake.sct >= 0 && snake.fam >= 0 && snake.rsc >= 0 && window.fpsls && window.fmlts) {
-          const sct = snake.sct + snake.rsc;
-          return Math.trunc(15 * (window.fpsls[sct] + snake.fam / window.fmlts[sct] - 1) - 5);
-        }
-      } catch (e) {
-        // Fallback to simple approximation
-      }
-      
-      // Simple fallback: use snake scale as approximation
-      return Math.max(50, (snake.sc || 1) * 50);
+      const sct = snake.sct + snake.rsc;
+      return Math.trunc(15 * (window.fpsls[sct] + snake.fam / window.fmlts[sct] - 1) - 5);
     }
 
     // Calculate turn arc points for visualization
@@ -347,25 +336,25 @@ The MIT License (MIT)
       const centerY = snake.yy;
       const currentAngle = snake.ang;
       const turnRadius = this.calculateTurnRadius(snake);
-      
+
       // Calculate turn center (perpendicular to current direction)
       const turnCenterX = centerX + Math.cos(currentAngle + direction * Math.PI / 2) * turnRadius;
       const turnCenterY = centerY + Math.sin(currentAngle + direction * Math.PI / 2) * turnRadius;
-      
+
       // Generate arc points
       const arcPoints = [];
       const startAngle = currentAngle + direction * Math.PI / 2 + Math.PI;
-      
+
       for (let i = 0; i <= this.arcResolution; i++) {
         const t = i / this.arcResolution;
         const angle = startAngle + direction * this.arcLength * t;
-        
+
         arcPoints.push({
           x: turnCenterX + Math.cos(angle) * turnRadius,
           y: turnCenterY + Math.sin(angle) * turnRadius
         });
       }
-      
+
       return {
         points: arcPoints,
         center: { x: turnCenterX, y: turnCenterY },
@@ -404,7 +393,7 @@ The MIT License (MIT)
       // Advanced speed-based safety calculations (same as before)
       const mySpeed = snakeSpeed;
       const isBoosting = mySpeed > 6.0;
-      
+
       // Calculate combined speed factor for safety distance
       let speedMultiplier = 1.0;
       if (isBoosting && targetIsBoosting) {
@@ -414,12 +403,12 @@ The MIT License (MIT)
       } else {
         speedMultiplier = 1.5; // Normal speeds
       }
-      
+
       // Add extra margin based on relative speeds
       const targetSpeed = targetSnake.sp || 5.78;
       const relativeSpeed = Math.abs(mySpeed - targetSpeed);
       const speedBonus = Math.min(relativeSpeed * 10, 50); // Max 50 extra pixels
-      
+
       const safeDistance = baseSafeDistance * speedMultiplier + speedBonus;
 
       // Check collision with current head position (reactive only)
@@ -586,7 +575,7 @@ The MIT License (MIT)
 
       // Calculate optimal avoidance direction
       const optimalDirection = this.calculateOptimalDirection(headPos, headAngle, snakeRadius);
-      
+
              // Dynamic smoothing based on speed and danger level
        const snake = window.slither;
        const currentSpeed = snake ? snake.sp : 5.78;
@@ -594,7 +583,7 @@ The MIT License (MIT)
        const closestDanger = Math.min(...this.dangerZones.map(d => d.distance));
        const avgRadius = this.dangerZones.reduce((sum, d) => sum + d.radius, 0) / this.dangerZones.length;
        const isEmergency = closestDanger < avgRadius * 1.5;
-       
+
        // Adaptive smoothing factor
        let adaptiveSmoothingFactor = this.controlSmoothingFactor;
        if (isEmergency && isBoosting) {
@@ -642,7 +631,7 @@ The MIT License (MIT)
       const criticalDangers = this.dangerZones.filter(danger => {
         // Always include very close dangers
         if (danger.distance < danger.radius * 2) return true;
-        
+
         // For snakes, only include if they're on collision course
         if (danger.type === 'snake') {
           const snake = window.slithers.find(s => s.id === danger.snakeId);
@@ -652,7 +641,7 @@ The MIT License (MIT)
             return angleDiff <= Math.PI / 3; // Within 60° of collision course
           }
         }
-        
+
         // Include static obstacles and body parts
         return true;
       });
@@ -674,13 +663,13 @@ The MIT License (MIT)
 
       // Calculate weighted average direction
       const optimalDirection = fastAtan2(totalAvoidanceY, totalAvoidanceX);
-      
+
              // Dynamic turn rate based on snake speed and danger proximity
        const snake = window.slither;
        const isBoosting = snake && snake.sp > 6.0;
        const closestDanger = Math.min(...this.dangerZones.map(d => d.distance));
        const isEmergency = closestDanger < snakeRadius * 3;
-       
+
        // More aggressive turning when boosting or in emergency
        let maxTurn;
        if (isEmergency && isBoosting) {
@@ -692,10 +681,10 @@ The MIT License (MIT)
        } else {
          maxTurn = Math.PI / 3; // 60 degrees normal
        }
-       
+
        let turnAmount = this.angleDifference(optimalDirection, headAngle);
        turnAmount = Math.max(-maxTurn, Math.min(maxTurn, turnAmount));
-       
+
        return headAngle + turnAmount;
     }
 
@@ -704,7 +693,7 @@ The MIT License (MIT)
       // Get the approach direction of the threat (where it's coming FROM)
       let approachAngle;
       let isValidThreat = true;
-      
+
       if (danger.type === 'moving_snake' || danger.type === 'snake') {
         // For moving snakes, validate if they're actually threatening
         const snake = window.slithers.find(s => s.id === danger.snakeId);
@@ -712,12 +701,12 @@ The MIT License (MIT)
           // Check if snake is actually moving toward us (collision course)
           const vectorToUs = fastAtan2(headPos.y - snake.yy, headPos.x - snake.xx);
           const angleDiff = Math.abs(this.angleDifference(snake.ang, vectorToUs));
-          
+
           // If snake is not generally heading toward us, it's not an immediate threat
           if (angleDiff > Math.PI / 2) { // More than 90° off from collision course
             isValidThreat = false;
           }
-          
+
           // Use snake's current movement direction
           approachAngle = snake.ang;
         } else {
@@ -742,7 +731,7 @@ The MIT License (MIT)
 
       // Determine escape direction based on approach quadrant
       let shouldEscapeLeft;
-      
+
       if (relativeApproachAngle >= 0 && relativeApproachAngle < Math.PI / 2) {
         // Threat coming from front-left (0° to 90°) -> Escape LEFT
         shouldEscapeLeft = true;
@@ -760,7 +749,7 @@ The MIT License (MIT)
       // Calculate escape direction perpendicular to our current heading
       const escapeLeft = headAngle - Math.PI / 2; // Turn left from current heading
       const escapeRight = headAngle + Math.PI / 2; // Turn right from current heading
-      
+
       // Add slight forward bias to avoid pure perpendicular movement
       const forwardBias = Math.PI / 8; // 22.5 degrees forward bias
       const leftEscape = escapeLeft + forwardBias;
@@ -843,7 +832,7 @@ The MIT License (MIT)
           y: headPos.y + Math.sin(this.lastControlAngle) * 150
         };
         this.visualizer.drawLine(headPos, controlPoint, "lime", 4);
-        
+
         // Draw control indicator
         this.visualizer.drawCircle(
           { x: controlPoint.x, y: controlPoint.y, r: 10 },
@@ -859,19 +848,17 @@ The MIT License (MIT)
       const mySnake = window.slither;
       if (!mySnake) return;
 
-      try {
-
       // Draw my turn arcs
       const myLeftArc = this.calculateTurnArc(mySnake, -1); // Left turn
       const myRightArc = this.calculateTurnArc(mySnake, 1);  // Right turn
-      
+
       // Draw my left turn arc (blue)
       this.drawArcPoints(myLeftArc.points, "blue", 2);
       this.visualizer.drawCircle(
         { x: myLeftArc.center.x, y: myLeftArc.center.y, r: 5 },
         "blue", true, 0.7
       );
-      
+
       // Draw my right turn arc (green)
       this.drawArcPoints(myRightArc.points, "green", 2);
       this.visualizer.drawCircle(
@@ -882,25 +869,25 @@ The MIT License (MIT)
       // Draw turn radius info text
       const turnRadius = this.calculateTurnRadius(mySnake);
       const isBoosting = mySnake.sp > this.boostSpeedThreshold;
-      
+
       // Find nearby enemy snakes for comparison
       for (const snake of window.slithers) {
         if (!snake || snake.id === mySnake.id) continue;
-        
+
         const distance = Math.sqrt(getDistance2(mySnake.xx, mySnake.yy, snake.xx, snake.yy));
         if (distance > 400) continue; // Only show nearby snakes
-        
+
         // Draw enemy turn arcs
         const enemyLeftArc = this.calculateTurnArc(snake, -1);
         const enemyRightArc = this.calculateTurnArc(snake, 1);
-        
+
         // Draw enemy left turn arc (red, dashed style with lower alpha)
         this.drawArcPoints(enemyLeftArc.points, "red", 1, 0.6);
         this.visualizer.drawCircle(
           { x: enemyLeftArc.center.x, y: enemyLeftArc.center.y, r: 3 },
           "red", true, 0.5
         );
-        
+
         // Draw enemy right turn arc (orange, dashed style with lower alpha)
         this.drawArcPoints(enemyRightArc.points, "orange", 1, 0.6);
         this.visualizer.drawCircle(
