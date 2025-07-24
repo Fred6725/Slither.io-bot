@@ -365,18 +365,23 @@ The MIT License (MIT)
       const isBoosting = snake.sp > 6.0;
       const sizeMultiplier = Math.max(0.5, snake.sc / 10);
 
-      // Increase lookahead distance when boosting or moving fast
-      this.lookaheadDistance = this.baseLookaheadDistance * (isBoosting ? 3.5 : speedMultiplier);
-
-      // Increase danger zone when boosting
-      this.dangerZoneRadius = this.baseDangerZoneRadius * (isBoosting ? 2.0 : 1.5);
-
-      // Increase safety margin based on speed and size
-      this.safetyMargin = this.baseSafetyMargin * speedMultiplier * sizeMultiplier;
-
-      // More aggressive steering when boosting
-      this.maxSteeringAngle = isBoosting ? Math.PI : Math.PI / 2;
-      this.smoothingFactor = isBoosting ? 0.8 : 0.5;
+      // Much more aggressive parameters when boosting
+      if (isBoosting) {
+        // Massive lookahead for boost speed
+        this.lookaheadDistance = this.baseLookaheadDistance * 4.5;
+        // Large danger zones for boost mode
+        this.dangerZoneRadius = this.baseDangerZoneRadius * 3.0;
+        // Extra safety margin for high speed
+        this.safetyMargin = this.baseSafetyMargin * speedMultiplier * sizeMultiplier * 2.0;
+        // More responsive control
+        this.controlSmoothingFactor = 0.7;
+      } else {
+        // Normal parameters for regular speed
+        this.lookaheadDistance = this.baseLookaheadDistance * speedMultiplier;
+        this.dangerZoneRadius = this.baseDangerZoneRadius * 1.5;
+        this.safetyMargin = this.baseSafetyMargin * speedMultiplier * sizeMultiplier;
+        this.controlSmoothingFactor = 0.3;
+      }
     }
 
     // Enhanced collision prediction with moving target support
@@ -607,9 +612,32 @@ The MIT License (MIT)
       let totalAvoidanceY = 0;
       let totalWeight = 0;
 
-      for (const danger of this.dangerZones) {
+      // Filter out non-critical threats to focus on immediate dangers
+      const criticalDangers = this.dangerZones.filter(danger => {
+        // Always include very close dangers
+        if (danger.distance < danger.radius * 2) return true;
+        
+        // For moving snakes, only include if they're on collision course
+        if (danger.type === 'moving_snake' || danger.type === 'snake') {
+          const snake = window.slithers.find(s => s.id === danger.snakeId);
+          if (snake) {
+            const vectorToUs = fastAtan2(headPos.y - snake.yy, headPos.x - snake.xx);
+            const angleDiff = Math.abs(this.angleDifference(snake.ang, vectorToUs));
+            return angleDiff <= Math.PI / 3; // Within 60° of collision course
+          }
+        }
+        
+        // Include static obstacles and body parts
+        return true;
+      });
+
+      for (const danger of criticalDangers) {
         const weight = danger.dangerLevel;
         const avoidanceDirection = this.calculateSingleDangerAvoidance(headPos, headAngle, danger);
+
+        // Skip if the avoidance direction is the same as current heading (non-threatening)
+        const directionChange = Math.abs(this.angleDifference(avoidanceDirection, headAngle));
+        if (directionChange < Math.PI / 12) continue; // Less than 15° change
 
         totalAvoidanceX += Math.cos(avoidanceDirection) * weight;
         totalAvoidanceY += Math.sin(avoidanceDirection) * weight;
@@ -621,8 +649,24 @@ The MIT License (MIT)
       // Calculate weighted average direction
       const optimalDirection = fastAtan2(totalAvoidanceY, totalAvoidanceX);
       
-             // Limit maximum turning angle to prevent U-turns and over-correction
-       const maxTurn = Math.PI / 3; // 60 degrees max turn per frame
+             // Dynamic turn rate based on snake speed and danger proximity
+       const snake = window.slither;
+       const isBoosting = snake && snake.sp > 6.0;
+       const closestDanger = Math.min(...this.dangerZones.map(d => d.distance));
+       const isEmergency = closestDanger < snakeRadius * 3;
+       
+       // More aggressive turning when boosting or in emergency
+       let maxTurn;
+       if (isEmergency && isBoosting) {
+         maxTurn = Math.PI / 2; // 90 degrees for boost emergency
+       } else if (isBoosting) {
+         maxTurn = Math.PI / 2.5; // 72 degrees for boost mode
+       } else if (isEmergency) {
+         maxTurn = Math.PI / 2.5; // 72 degrees for emergency
+       } else {
+         maxTurn = Math.PI / 3; // 60 degrees normal
+       }
+       
        let turnAmount = this.angleDifference(optimalDirection, headAngle);
        turnAmount = Math.max(-maxTurn, Math.min(maxTurn, turnAmount));
        
@@ -633,22 +677,55 @@ The MIT License (MIT)
     calculateSingleDangerAvoidance(headPos, headAngle, danger) {
       // Get the approach direction of the threat (where it's coming FROM)
       let approachAngle;
+      let isValidThreat = true;
       
       if (danger.type === 'moving_snake' || danger.type === 'snake') {
-        // For moving snakes, use their movement direction
+        // For moving snakes, validate if they're actually threatening
         const snake = window.slithers.find(s => s.id === danger.snakeId);
         if (snake && snake.ang !== undefined) {
-          // The approach angle is the direction the enemy snake is moving
-          approachAngle = snake.ang;
+          // Check if snake is actually moving toward us (collision course)
+          const vectorToUs = fastAtan2(headPos.y - snake.yy, headPos.x - snake.xx);
+          const angleDiff = Math.abs(this.angleDifference(snake.ang, vectorToUs));
+          
+          // If snake is not generally heading toward us, it's not an immediate threat
+          if (angleDiff > Math.PI / 2) { // More than 90° off from collision course
+            isValidThreat = false;
+          }
+          
+          // Check for erratic movement (circling/turning) - use position-based approach instead
+          const history = this.snakeHistory.get(snake.id);
+          if (history && history.length >= 3) {
+            const recent = history.slice(-3);
+            let angleChanges = 0;
+            for (let i = 1; i < recent.length; i++) {
+              const angleDiff = Math.abs(this.angleDifference(recent[i].angle, recent[i-1].angle));
+              if (angleDiff > Math.PI / 6) angleChanges++; // > 30° change
+            }
+            
+            // If snake changed direction significantly in recent frames, use position-based approach
+            if (angleChanges >= 2) {
+              const obstacleAngle = fastAtan2(danger.point.y - headPos.y, danger.point.x - headPos.x);
+              approachAngle = obstacleAngle + Math.PI;
+            } else {
+              approachAngle = snake.ang;
+            }
+          } else {
+            approachAngle = snake.ang;
+          }
         } else {
           // Fallback: calculate approach from relative position
           const obstacleAngle = fastAtan2(danger.point.y - headPos.y, danger.point.x - headPos.x);
-          approachAngle = obstacleAngle + Math.PI; // Coming from opposite direction
+          approachAngle = obstacleAngle + Math.PI;
         }
       } else {
         // For static obstacles (borders, body parts), use position-based approach
         const obstacleAngle = fastAtan2(danger.point.y - headPos.y, danger.point.x - headPos.x);
-        approachAngle = obstacleAngle + Math.PI; // Coming from opposite direction
+        approachAngle = obstacleAngle + Math.PI;
+      }
+
+      // Skip non-threatening snakes unless very close
+      if (!isValidThreat && danger.distance > danger.radius * 2) {
+        return headAngle; // Continue current direction
       }
 
       // Calculate the relative approach angle compared to our heading
