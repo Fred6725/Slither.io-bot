@@ -323,15 +323,19 @@ The MIT License (MIT)
       }
     }
 
-    // Predict snake position based on movement history
+    // Predict snake position based on movement history with momentum consideration
     predictSnakePosition(snake, timeHorizon) {
       const history = this.snakeHistory.get(snake.id);
+      const currentSpeed = snake.sp || 5.78;
+      const isFastMoving = currentSpeed > 7.0;
+      
       if (!history || history.length < 2) {
         // No history - use current position and angle for basic prediction
-        const currentSpeed = snake.sp || 5.78;
+        // Use longer prediction time for fast-moving snakes
+        const predictionMultiplier = isFastMoving ? 1.5 : 1.0;
         return {
-          x: snake.xx + Math.cos(snake.ang) * currentSpeed * timeHorizon * 60,
-          y: snake.yy + Math.sin(snake.ang) * currentSpeed * timeHorizon * 60
+          x: snake.xx + Math.cos(snake.ang) * currentSpeed * timeHorizon * 60 * predictionMultiplier,
+          y: snake.yy + Math.sin(snake.ang) * currentSpeed * timeHorizon * 60 * predictionMultiplier
         };
       }
 
@@ -339,49 +343,77 @@ The MIT License (MIT)
       const recent = history.slice(-3);
       const latest = recent[recent.length - 1];
 
-      // Calculate average velocity
+      // Calculate weighted velocity (more recent = higher weight)
       let avgVelocity = { x: 0, y: 0 };
+      let totalWeight = 0;
+      
       for (let i = 1; i < recent.length; i++) {
         const dt = (recent[i].time - recent[i-1].time) / 1000;
         if (dt > 0) {
-          avgVelocity.x += (recent[i].position.x - recent[i-1].position.x) / dt;
-          avgVelocity.y += (recent[i].position.y - recent[i-1].position.y) / dt;
+          const weight = i; // More recent frames have higher weight
+          const velX = (recent[i].position.x - recent[i-1].position.x) / dt;
+          const velY = (recent[i].position.y - recent[i-1].position.y) / dt;
+          
+          avgVelocity.x += velX * weight;
+          avgVelocity.y += velY * weight;
+          totalWeight += weight;
         }
       }
 
-      avgVelocity.x /= (recent.length - 1);
-      avgVelocity.y /= (recent.length - 1);
+      if (totalWeight > 0) {
+        avgVelocity.x /= totalWeight;
+        avgVelocity.y /= totalWeight;
+      }
 
-      // Predict future position
+      // Add momentum factor for fast-moving snakes
+      let momentumFactor = 1.0;
+      if (isFastMoving) {
+        // Fast snakes continue their trajectory longer
+        momentumFactor = 1.3 + (currentSpeed - 7.0) * 0.1;
+      }
+
+      // Predict future position with momentum
+      const predictionTime = timeHorizon * momentumFactor;
       return {
-        x: latest.position.x + avgVelocity.x * timeHorizon,
-        y: latest.position.y + avgVelocity.y * timeHorizon
+        x: latest.position.x + avgVelocity.x * predictionTime,
+        y: latest.position.y + avgVelocity.y * predictionTime
       };
     }
 
     // Adjust collision parameters based on snake speed and size
     adjustDynamicParameters(snake) {
-      const speedMultiplier = snake.sp / 5.78; // Base speed is 5.78
-      const isBoosting = snake.sp > 6.0;
+      const currentSpeed = snake.sp;
+      const baseSpeed = 5.78;
+      const speedMultiplier = currentSpeed / baseSpeed;
+      const isBoosting = currentSpeed > 6.0;
+      const isHighBoost = currentSpeed > 8.0; // Very fast boost
       const sizeMultiplier = Math.max(0.5, snake.sc / 10);
 
-      // Much more aggressive parameters when boosting
-      if (isBoosting) {
-        // Massive lookahead for boost speed
-        this.lookaheadDistance = this.baseLookaheadDistance * 4.5;
-        // Large danger zones for boost mode
-        this.dangerZoneRadius = this.baseDangerZoneRadius * 3.0;
-        // Extra safety margin for high speed
+      // Speed-adaptive scaling with multiple tiers
+      if (isHighBoost) {
+        // Extreme boost mode (8.0+ speed)
+        this.lookaheadDistance = this.baseLookaheadDistance * 6.0;
+        this.dangerZoneRadius = this.baseDangerZoneRadius * 4.0;
+        this.safetyMargin = this.baseSafetyMargin * speedMultiplier * sizeMultiplier * 2.5;
+        this.controlSmoothingFactor = 0.8; // Very responsive
+      } else if (isBoosting) {
+        // Regular boost mode (6.0-8.0 speed)
+        this.lookaheadDistance = this.baseLookaheadDistance * (3.5 + speedMultiplier);
+        this.dangerZoneRadius = this.baseDangerZoneRadius * (2.5 + speedMultiplier * 0.5);
         this.safetyMargin = this.baseSafetyMargin * speedMultiplier * sizeMultiplier * 2.0;
-        // More responsive control
         this.controlSmoothingFactor = 0.7;
       } else {
-        // Normal parameters for regular speed
-        this.lookaheadDistance = this.baseLookaheadDistance * speedMultiplier;
-        this.dangerZoneRadius = this.baseDangerZoneRadius * 1.5;
+        // Normal speed mode
+        this.lookaheadDistance = this.baseLookaheadDistance * Math.max(1.2, speedMultiplier);
+        this.dangerZoneRadius = this.baseDangerZoneRadius * Math.max(1.3, speedMultiplier * 1.2);
         this.safetyMargin = this.baseSafetyMargin * speedMultiplier * sizeMultiplier;
         this.controlSmoothingFactor = 0.3;
       }
+
+      // Additional scaling based on actual speed value for fine-tuning
+      const speedBonus = Math.max(0, (currentSpeed - baseSpeed) * 30); // Extra pixels per speed unit
+      this.lookaheadDistance += speedBonus;
+      this.dangerZoneRadius += speedBonus * 0.6;
     }
 
     // Enhanced collision prediction with moving target support
@@ -425,9 +457,26 @@ The MIT License (MIT)
       const targetRadius = this.getSnakeWidth(targetSnake.sc) / 2;
       const baseSafeDistance = snakeRadius + targetRadius + this.safetyMargin;
 
-      // Dynamic safety distance based on boost predictions
-      const speedMultiplier = prediction.currentlyBoosting ? 2.0 : 1.0;
-      const safeDistance = baseSafeDistance * speedMultiplier;
+      // Advanced speed-based safety calculations
+      const mySpeed = snakeSpeed;
+      const isBoosting = mySpeed > 6.0;
+      const targetIsBoosting = prediction.currentlyBoosting;
+      
+      // Calculate combined speed factor for safety distance
+      let speedMultiplier = 1.0;
+      if (isBoosting && targetIsBoosting) {
+        speedMultiplier = 3.5; // Both boosting - very dangerous
+      } else if (isBoosting || targetIsBoosting) {
+        speedMultiplier = 2.5; // One boosting - dangerous
+      } else {
+        speedMultiplier = 1.5; // Normal speeds
+      }
+      
+      // Add extra margin based on relative speeds
+      const relativeSpeed = Math.abs(mySpeed - predictedSpeed);
+      const speedBonus = Math.min(relativeSpeed * 10, 50); // Max 50 extra pixels
+      
+      const safeDistance = baseSafeDistance * speedMultiplier + speedBonus;
 
       // Check collision with predicted head position
       const predictedPos = prediction.predictedPosition;
@@ -579,15 +628,33 @@ The MIT License (MIT)
       // Calculate optimal avoidance direction
       const optimalDirection = this.calculateOptimalDirection(headPos, headAngle, snakeRadius);
       
-      // Apply smoothing to direction changes
-      if (this.lastControlAngle !== 0) {
-        const angleDiff = this.angleDifference(optimalDirection, this.lastControlAngle);
-        this.lastControlAngle += angleDiff * this.controlSmoothingFactor;
-      } else {
-        this.lastControlAngle = optimalDirection;
-      }
+             // Dynamic smoothing based on speed and danger level
+       const snake = window.slither;
+       const currentSpeed = snake ? snake.sp : 5.78;
+       const isBoosting = currentSpeed > 6.0;
+       const closestDanger = Math.min(...this.dangerZones.map(d => d.distance));
+       const avgRadius = this.dangerZones.reduce((sum, d) => sum + d.radius, 0) / this.dangerZones.length;
+       const isEmergency = closestDanger < avgRadius * 1.5;
+       
+       // Adaptive smoothing factor
+       let adaptiveSmoothingFactor = this.controlSmoothingFactor;
+       if (isEmergency && isBoosting) {
+         adaptiveSmoothingFactor = 0.9; // Very responsive for boost emergencies
+       } else if (isEmergency) {
+         adaptiveSmoothingFactor = 0.8; // Responsive for emergencies
+       } else if (isBoosting) {
+         adaptiveSmoothingFactor = 0.6; // Moderately responsive for boost
+       }
 
-      return this.lastControlAngle;
+       // Apply smoothing to direction changes
+       if (this.lastControlAngle !== 0) {
+         const angleDiff = this.angleDifference(optimalDirection, this.lastControlAngle);
+         this.lastControlAngle += angleDiff * adaptiveSmoothingFactor;
+       } else {
+         this.lastControlAngle = optimalDirection;
+       }
+
+       return this.lastControlAngle;
     }
 
     // Calculate emergency direction for critical situations
