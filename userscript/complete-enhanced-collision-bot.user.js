@@ -233,6 +233,18 @@ The MIT License (MIT)
     // Reactive collision detection parameters
     boostSpeedThreshold = 6.5;
 
+    // Turn Radius Calibration Constants (ADJUST THESE!)
+    turnRadiusBase = 100;           // Base turn radius in pixels
+    lengthMultiplier = 0.8;         // How much snake length affects turning (0.5-2.0)
+    speedMultiplier = 1.2;          // How much speed affects turning (0.8-2.0)
+    boostTurnPenalty = 2.5;         // Turn radius multiplier when boosting (1.5-4.0)
+    massMultiplier = 0.3;           // How much snake mass affects turning (0.1-1.0)
+    
+    // Turn visualization settings
+    showTurnArcs = true;            // Show predicted turn arcs
+    arcResolution = 32;             // Number of points in arc (16-64)
+    arcLength = Math.PI;            // How much of turn arc to show (π/2 to 2π)
+
     // Full control mode parameters
     controlSmoothingFactor = 0.3;
     lastControlAngle = 0;
@@ -284,6 +296,77 @@ The MIT License (MIT)
       }
 
       return avoidanceAngle;
+    }
+
+    // Calculate turn radius based on snake properties
+    calculateTurnRadius(snake) {
+      const length = this.getSnakeLength(snake);
+      const speed = snake.sp || 5.78;
+      const isBoosting = speed > this.boostSpeedThreshold;
+      const mass = snake.sc || 1.0;
+
+      // Base calculation
+      let turnRadius = this.turnRadiusBase;
+      
+      // Length factor: longer snakes turn wider
+      const lengthFactor = 1 + (length / 1000) * this.lengthMultiplier;
+      turnRadius *= lengthFactor;
+      
+      // Speed factor: faster snakes turn wider
+      const speedFactor = 1 + ((speed - 5.78) / 5.78) * this.speedMultiplier;
+      turnRadius *= speedFactor;
+      
+      // Boost penalty: boosting makes turning much harder
+      if (isBoosting) {
+        turnRadius *= this.boostTurnPenalty;
+      }
+      
+      // Mass factor: bigger snakes turn wider
+      const massFactor = 1 + (mass - 1) * this.massMultiplier;
+      turnRadius *= massFactor;
+
+      return Math.max(50, turnRadius); // Minimum turn radius of 50 pixels
+    }
+
+    // Get snake length (reuse from bot)
+    getSnakeLength(snake) {
+      if (!snake || snake.sct < 0 || snake.fam < 0 || snake.rsc < 0) {
+        return 0;
+      }
+      const sct = snake.sct + snake.rsc;
+      return Math.trunc(15 * (window.fpsls[sct] + snake.fam / window.fmlts[sct] - 1) - 5);
+    }
+
+    // Calculate turn arc points for visualization
+    calculateTurnArc(snake, direction) {
+      const centerX = snake.xx;
+      const centerY = snake.yy;
+      const currentAngle = snake.ang;
+      const turnRadius = this.calculateTurnRadius(snake);
+      
+      // Calculate turn center (perpendicular to current direction)
+      const turnCenterX = centerX + Math.cos(currentAngle + direction * Math.PI / 2) * turnRadius;
+      const turnCenterY = centerY + Math.sin(currentAngle + direction * Math.PI / 2) * turnRadius;
+      
+      // Generate arc points
+      const arcPoints = [];
+      const startAngle = currentAngle + direction * Math.PI / 2 + Math.PI;
+      
+      for (let i = 0; i <= this.arcResolution; i++) {
+        const t = i / this.arcResolution;
+        const angle = startAngle + direction * this.arcLength * t;
+        
+        arcPoints.push({
+          x: turnCenterX + Math.cos(angle) * turnRadius,
+          y: turnCenterY + Math.sin(angle) * turnRadius
+        });
+      }
+      
+      return {
+        points: arcPoints,
+        center: { x: turnCenterX, y: turnCenterY },
+        radius: turnRadius
+      };
     }
 
     // Simple reactive collision detection - no prediction needed
@@ -721,6 +804,11 @@ The MIT License (MIT)
       // Draw lookahead line
       this.visualizer.drawLine(headPos, lookAheadPoint, "cyan", 2);
 
+      // Draw turn radius arcs for calibration
+      if (this.showTurnArcs && window.slither) {
+        this.drawTurnRadiusDebug();
+      }
+
       // Draw danger zones
       for (const danger of this.dangerZones) {
         if (danger.type === 'snake_body') {
@@ -762,7 +850,69 @@ The MIT License (MIT)
       }
     }
 
+    // Draw turn radius debug visualization
+    drawTurnRadiusDebug() {
+      const mySnake = window.slither;
+      if (!mySnake) return;
 
+      // Draw my turn arcs
+      const myLeftArc = this.calculateTurnArc(mySnake, -1); // Left turn
+      const myRightArc = this.calculateTurnArc(mySnake, 1);  // Right turn
+      
+      // Draw my left turn arc (blue)
+      this.drawArcPoints(myLeftArc.points, "blue", 2);
+      this.visualizer.drawCircle(
+        { x: myLeftArc.center.x, y: myLeftArc.center.y, r: 5 },
+        "blue", true, 0.7
+      );
+      
+      // Draw my right turn arc (green)
+      this.drawArcPoints(myRightArc.points, "green", 2);
+      this.visualizer.drawCircle(
+        { x: myRightArc.center.x, y: myRightArc.center.y, r: 5 },
+        "green", true, 0.7
+      );
+
+      // Draw turn radius info text
+      const turnRadius = this.calculateTurnRadius(mySnake);
+      const isBoosting = mySnake.sp > this.boostSpeedThreshold;
+      
+      // Find nearby enemy snakes for comparison
+      for (const snake of window.slithers) {
+        if (!snake || snake.id === mySnake.id) continue;
+        
+        const distance = Math.sqrt(getDistance2(mySnake.xx, mySnake.yy, snake.xx, snake.yy));
+        if (distance > 400) continue; // Only show nearby snakes
+        
+        // Draw enemy turn arcs
+        const enemyLeftArc = this.calculateTurnArc(snake, -1);
+        const enemyRightArc = this.calculateTurnArc(snake, 1);
+        
+        // Draw enemy left turn arc (red, dashed style with lower alpha)
+        this.drawArcPoints(enemyLeftArc.points, "red", 1, 0.6);
+        this.visualizer.drawCircle(
+          { x: enemyLeftArc.center.x, y: enemyLeftArc.center.y, r: 3 },
+          "red", true, 0.5
+        );
+        
+        // Draw enemy right turn arc (orange, dashed style with lower alpha)
+        this.drawArcPoints(enemyRightArc.points, "orange", 1, 0.6);
+        this.visualizer.drawCircle(
+          { x: enemyRightArc.center.x, y: enemyRightArc.center.y, r: 3 },
+          "orange", true, 0.5
+        );
+      }
+
+      // Debug info display
+      console.log(`Turn Radius: ${turnRadius.toFixed(0)}px, Boost: ${isBoosting}, Speed: ${mySnake.sp.toFixed(1)}, Length: ${this.getSnakeLength(mySnake)}`);
+    }
+
+    // Helper method to draw arc points as connected lines
+    drawArcPoints(points, color, width = 2, alpha = 1.0) {
+      for (let i = 0; i < points.length - 1; i++) {
+        this.visualizer.drawLine(points[i], points[i + 1], color, width);
+      }
+    }
 
     // Toggle collision avoidance
     toggle() {
