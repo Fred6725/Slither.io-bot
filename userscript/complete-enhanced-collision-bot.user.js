@@ -321,13 +321,24 @@ The MIT License (MIT)
       return Math.max(30, turnRadius); // Minimum turn radius of 30 pixels
     }
 
-    // Get snake length (reuse from bot)
+    // Get snake length (simplified version)
     getSnakeLength(snake) {
-      if (!snake || snake.sct < 0 || snake.fam < 0 || snake.rsc < 0) {
+      if (!snake) {
         return 0;
       }
-      const sct = snake.sct + snake.rsc;
-      return Math.trunc(15 * (window.fpsls[sct] + snake.fam / window.fmlts[sct] - 1) - 5);
+      
+      // Try the complex calculation first
+      try {
+        if (snake.sct >= 0 && snake.fam >= 0 && snake.rsc >= 0 && window.fpsls && window.fmlts) {
+          const sct = snake.sct + snake.rsc;
+          return Math.trunc(15 * (window.fpsls[sct] + snake.fam / window.fmlts[sct] - 1) - 5);
+        }
+      } catch (e) {
+        // Fallback to simple approximation
+      }
+      
+      // Simple fallback: use snake scale as approximation
+      return Math.max(50, (snake.sc || 1) * 50);
     }
 
     // Calculate turn arc points for visualization
@@ -848,6 +859,8 @@ The MIT License (MIT)
       const mySnake = window.slither;
       if (!mySnake) return;
 
+      try {
+
       // Draw my turn arcs
       const myLeftArc = this.calculateTurnArc(mySnake, -1); // Left turn
       const myRightArc = this.calculateTurnArc(mySnake, 1);  // Right turn
@@ -902,6 +915,10 @@ The MIT License (MIT)
       const speedRatio = ((Math.min(mySnake.sp, 12.0) - 5.78) / 5.78).toFixed(2);
       
       console.log(`Turn Radius: ${turnRadius.toFixed(0)}px | Speed: ${mySnake.sp.toFixed(1)} (ratio: ${speedRatio}) | Boost: ${isBoosting} | Length: ${myLength} | Length Factor: ${(1 + myLength * this.lengthMultiplier).toFixed(2)}`);
+      
+      } catch (error) {
+        console.error("Turn radius debug error:", error);
+      }
     }
 
     // Helper method to draw arc points as connected lines
