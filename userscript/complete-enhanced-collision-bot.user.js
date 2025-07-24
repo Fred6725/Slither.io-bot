@@ -234,11 +234,9 @@ The MIT License (MIT)
     boostSpeedThreshold = 6.5;
 
     // Turn Radius Calibration Constants (ADJUST THESE!)
-    turnRadiusBase = 100;           // Base turn radius in pixels
-    lengthMultiplier = 0.8;         // How much snake length affects turning (0.5-2.0)
-    speedMultiplier = 1.2;          // How much speed affects turning (0.8-2.0)
-    boostTurnPenalty = 2.5;         // Turn radius multiplier when boosting (1.5-4.0)
-    massMultiplier = 0.3;           // How much snake mass affects turning (0.1-1.0)
+    turnRadiusBase = 50;            // Base turn radius in pixels (30-100)
+    lengthSpeedMultiplier = 0.05;   // Combined length effect (replaces lengthMultiplier + massMultiplier)
+    speedBoostMultiplier = 0.756;   // Combined speed + boost effect (replaces speedMultiplier + boostTurnPenalty)
     
     // Turn visualization settings
     showTurnArcs = true;            // Show predicted turn arcs
@@ -302,30 +300,25 @@ The MIT License (MIT)
     calculateTurnRadius(snake) {
       const length = this.getSnakeLength(snake);
       const speed = snake.sp || 5.78;
-      const isBoosting = speed > this.boostSpeedThreshold;
-      const mass = snake.sc || 1.0;
+      const cruisingSpeed = 5.78;
+      const maxSpeed = 12.0; // Maximum achievable speed
+      
+      // Clamp speed to realistic range
+      const clampedSpeed = Math.min(speed, maxSpeed);
 
       // Base calculation
       let turnRadius = this.turnRadiusBase;
       
-      // Length factor: longer snakes turn wider
-      const lengthFactor = 1 + (length / 1000) * this.lengthMultiplier;
+      // Combined length effect (includes what was mass effect, since length = mass in Slither.io)
+      const lengthFactor = 1 + (length * this.lengthSpeedMultiplier);
       turnRadius *= lengthFactor;
       
-      // Speed factor: faster snakes turn wider
-      const speedFactor = 1 + ((speed - 5.78) / 5.78) * this.speedMultiplier;
-      turnRadius *= speedFactor;
-      
-      // Boost penalty: boosting makes turning much harder
-      if (isBoosting) {
-        turnRadius *= this.boostTurnPenalty;
-      }
-      
-      // Mass factor: bigger snakes turn wider
-      const massFactor = 1 + (mass - 1) * this.massMultiplier;
-      turnRadius *= massFactor;
+      // Combined speed + boost effect (single multiplier for all speed-related turning difficulty)
+      const speedRatio = Math.max(0, (clampedSpeed - cruisingSpeed) / cruisingSpeed);
+      const speedBoostFactor = 1 + (speedRatio * this.speedBoostMultiplier);
+      turnRadius *= speedBoostFactor;
 
-      return Math.max(50, turnRadius); // Minimum turn radius of 50 pixels
+      return Math.max(30, turnRadius); // Minimum turn radius of 30 pixels
     }
 
     // Get snake length (simplified version)
@@ -918,8 +911,12 @@ The MIT License (MIT)
 
       // Debug info display
       const turnRadius = this.calculateTurnRadius(mySnake);
+      const myLength = this.getSnakeLength(mySnake);
+      const clampedSpeed = Math.min(mySnake.sp, 12.0);
       const isBoosting = mySnake.sp > this.boostSpeedThreshold;
-      console.log(`Turn Radius: ${turnRadius.toFixed(0)}px, Boost: ${isBoosting}, Speed: ${mySnake.sp.toFixed(1)}, Length: ${this.getSnakeLength(mySnake)}`);
+      const speedRatio = Math.max(0, (clampedSpeed - 5.78) / 5.78);
+      
+      console.log(`Turn Radius: ${turnRadius.toFixed(0)}px | Speed: ${mySnake.sp.toFixed(1)} (clamped: ${clampedSpeed.toFixed(1)}, ratio: ${speedRatio.toFixed(2)}) | Boost: ${isBoosting} | Length: ${myLength} | Length Factor: ${(1 + myLength * this.lengthSpeedMultiplier).toFixed(2)} | Speed Factor: ${(1 + speedRatio * this.speedBoostMultiplier).toFixed(2)}`);
       
       } catch (error) {
         console.error("Turn radius debug error:", error);
