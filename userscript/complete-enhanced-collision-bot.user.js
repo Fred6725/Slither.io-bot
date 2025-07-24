@@ -622,7 +622,7 @@ The MIT License (MIT)
       const optimalDirection = fastAtan2(totalAvoidanceY, totalAvoidanceX);
       
              // Limit maximum turning angle to prevent U-turns and over-correction
-       const maxTurn = Math.PI / 4; // 45 degrees max turn per frame
+       const maxTurn = Math.PI / 3; // 60 degrees max turn per frame
        let turnAmount = this.angleDifference(optimalDirection, headAngle);
        turnAmount = Math.max(-maxTurn, Math.min(maxTurn, turnAmount));
        
@@ -633,6 +633,27 @@ The MIT License (MIT)
     calculateSingleDangerAvoidance(headPos, headAngle, danger) {
       const obstacleAngle = fastAtan2(danger.point.y - headPos.y, danger.point.x - headPos.x);
 
+      // Calculate the relative angle of the threat compared to our heading
+      let relativeAngle = this.angleDifference(obstacleAngle, headAngle);
+      if (relativeAngle < 0) relativeAngle += 2 * Math.PI; // Normalize to 0-2π
+
+      // Determine escape direction based on threat quadrant
+      let shouldEscapeLeft;
+      
+      if (relativeAngle >= 0 && relativeAngle < Math.PI / 2) {
+        // Front-left quadrant (0° to 90°) -> Escape LEFT
+        shouldEscapeLeft = true;
+      } else if (relativeAngle >= Math.PI / 2 && relativeAngle < Math.PI) {
+        // Front-right quadrant (90° to 180°) -> Escape RIGHT
+        shouldEscapeLeft = false;
+      } else if (relativeAngle >= Math.PI && relativeAngle < 3 * Math.PI / 2) {
+        // Rear-left quadrant (180° to 270°) -> Escape LEFT
+        shouldEscapeLeft = true;
+      } else {
+        // Rear-right quadrant (270° to 360°) -> Escape RIGHT
+        shouldEscapeLeft = false;
+      }
+
       // Calculate tangential directions (parallel to obstacle + slight divergence)
       const tangentAngle = obstacleAngle + Math.PI / 2; // Perpendicular to obstacle direction
       const divergenceAngle = Math.PI / 8; // 22.5 degrees slight divergence
@@ -640,21 +661,20 @@ The MIT License (MIT)
       const leftTangent = tangentAngle + divergenceAngle;
       const rightTangent = tangentAngle - divergenceAngle;
 
-      // Choose the tangent direction that requires less turning from current heading
-      const leftDiff = Math.abs(this.angleDifference(leftTangent, headAngle));
-      const rightDiff = Math.abs(this.angleDifference(rightTangent, headAngle));
+      // Choose escape direction based on tactical logic
+      let chosenDirection = shouldEscapeLeft ? leftTangent : rightTangent;
 
       // For very close approaches, add more divergence to ensure safety
       if (danger.distance < danger.radius * 1.5) {
         const extraDivergence = Math.PI / 6; // 30 degrees for closer obstacles
-        if (leftDiff < rightDiff) {
-          return leftTangent + extraDivergence;
+        if (shouldEscapeLeft) {
+          chosenDirection = leftTangent + extraDivergence;
         } else {
-          return rightTangent - extraDivergence;
+          chosenDirection = rightTangent - extraDivergence;
         }
       }
 
-      return leftDiff < rightDiff ? leftTangent : rightTangent;
+      return chosenDirection;
     }
 
     // Check if point is to the left of the line
