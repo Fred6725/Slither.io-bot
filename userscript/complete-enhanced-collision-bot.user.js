@@ -230,10 +230,8 @@ The MIT License (MIT)
     maxSteeringAngle = Math.PI / 2; // 90 degrees max steering
     smoothingFactor = 0.5;
 
-    // Moving target prediction parameters
-    predictionTimeHorizon = 1.0; // seconds
+    // Reactive collision detection parameters
     boostSpeedThreshold = 6.5;
-    maxBoostSpeed = 12.0;
 
     // Full control mode parameters
     controlSmoothingFactor = 0.3;
@@ -250,8 +248,7 @@ The MIT License (MIT)
     avoidanceVector = { x: 0, y: 0 };
     lastCorrectionAngle = 0;
 
-    // Snake movement history for prediction
-    snakeHistory = new Map();
+
 
     constructor(visualizer) {
       this.visualizer = visualizer;
@@ -266,14 +263,11 @@ The MIT License (MIT)
       const headAngle = snake.ang;
       const snakeRadius = this.getSnakeWidth(snake.sc) / 2;
 
-      // Update snake movement history
-      this.updateSnakeHistory(snakes);
-
       // Adjust parameters based on speed and snake size
       this.adjustDynamicParameters(snake);
 
-      // Predict collision dangers with moving target prediction
-      this.predictEnhancedCollisions(headPos, headAngle, snakeRadius, snake.sp, snakes, borderSize);
+      // Detect immediate collision dangers (reactive only)
+      this.detectReactiveCollisions(headPos, headAngle, snakeRadius, snake.sp, snakes, borderSize);
 
       // Debug output
       if (this.dangerZones.length > 0) {
@@ -292,92 +286,95 @@ The MIT License (MIT)
       return avoidanceAngle;
     }
 
-    // Update snake movement history for prediction
-    updateSnakeHistory(snakes) {
-      const currentTime = Date.now();
+    // Simple reactive collision detection - no prediction needed
+    detectReactiveCollisions(headPos, headAngle, snakeRadius, snakeSpeed, snakes, borderSize) {
+      const lookAheadVector = {
+        x: Math.cos(headAngle) * this.lookaheadDistance,
+        y: Math.sin(headAngle) * this.lookaheadDistance
+      };
 
+      // Check collision with other snakes (current positions only)
       for (const snake of snakes) {
         if (!snake || snake.id === window.slither.id) continue;
 
-        const snakeId = snake.id;
         const currentSpeed = snake.sp || 5.78;
         const isBoosting = currentSpeed > this.boostSpeedThreshold;
 
-        if (!this.snakeHistory.has(snakeId)) {
-          this.snakeHistory.set(snakeId, []);
-        }
-
-        const history = this.snakeHistory.get(snakeId);
-        history.push({
-          time: currentTime,
-          position: { x: snake.xx, y: snake.yy },
-          angle: snake.ang,
-          speed: currentSpeed,
-          isBoosting: isBoosting,
-          mass: snake.sc
-        });
-
-        // Keep only recent history (last 3 seconds)
-        const historyLimit = currentTime - 3000;
-        this.snakeHistory.set(snakeId, history.filter(entry => entry.time > historyLimit));
+        this.checkReactiveSnakeCollision(headPos, lookAheadVector, snakeRadius, snakeSpeed, snake, isBoosting);
       }
+
+      // Check collision with borders
+      this.checkBorderCollision(headPos, lookAheadVector, snakeRadius, borderSize);
     }
 
-    // Predict snake position based on movement history with momentum consideration
-    predictSnakePosition(snake, timeHorizon) {
-      const history = this.snakeHistory.get(snake.id);
-      const currentSpeed = snake.sp || 5.78;
-      const isFastMoving = currentSpeed > 7.0;
+    // Simple reactive snake collision detection
+    checkReactiveSnakeCollision(headPos, lookAheadVector, snakeRadius, snakeSpeed, targetSnake, targetIsBoosting) {
+      if (!targetSnake.pts || targetSnake.pts.length < 1) return;
+
+      const targetRadius = this.getSnakeWidth(targetSnake.sc) / 2;
+      const baseSafeDistance = snakeRadius + targetRadius + this.safetyMargin;
+
+      // Advanced speed-based safety calculations (same as before)
+      const mySpeed = snakeSpeed;
+      const isBoosting = mySpeed > 6.0;
       
-      if (!history || history.length < 2) {
-        // No history - use current position and angle for basic prediction
-        // Use longer prediction time for fast-moving snakes
-        const predictionMultiplier = isFastMoving ? 1.5 : 1.0;
-        return {
-          x: snake.xx + Math.cos(snake.ang) * currentSpeed * timeHorizon * 60 * predictionMultiplier,
-          y: snake.yy + Math.sin(snake.ang) * currentSpeed * timeHorizon * 60 * predictionMultiplier
-        };
+      // Calculate combined speed factor for safety distance
+      let speedMultiplier = 1.0;
+      if (isBoosting && targetIsBoosting) {
+        speedMultiplier = 3.5; // Both boosting - very dangerous
+      } else if (isBoosting || targetIsBoosting) {
+        speedMultiplier = 2.5; // One boosting - dangerous
+      } else {
+        speedMultiplier = 1.5; // Normal speeds
+      }
+      
+      // Add extra margin based on relative speeds
+      const targetSpeed = targetSnake.sp || 5.78;
+      const relativeSpeed = Math.abs(mySpeed - targetSpeed);
+      const speedBonus = Math.min(relativeSpeed * 10, 50); // Max 50 extra pixels
+      
+      const safeDistance = baseSafeDistance * speedMultiplier + speedBonus;
+
+      // Check collision with current head position (reactive only)
+      const currentHeadDistance = Math.sqrt(getDistance2(headPos.x, headPos.y, targetSnake.xx, targetSnake.yy));
+      if (currentHeadDistance < safeDistance) {
+        const approachAngle = this.calculateApproachAngle(headPos, { x: targetSnake.xx, y: targetSnake.yy }, lookAheadVector);
+        const dangerLevel = this.calculateDangerLevel(currentHeadDistance, safeDistance, approachAngle);
+
+        this.dangerZones.push({
+          point: { x: targetSnake.xx, y: targetSnake.yy },
+          distance: currentHeadDistance,
+          radius: safeDistance,
+          approachAngle: approachAngle,
+          dangerLevel: dangerLevel,
+          type: 'snake',
+          isBoosting: targetIsBoosting,
+          snakeId: targetSnake.id
+        });
       }
 
-      // Use movement history for better prediction
-      const recent = history.slice(-3);
-      const latest = recent[recent.length - 1];
+      // Check snake body collision - mark dangerous body parts with orange dots
+      const pts = targetSnake.pts;
+      for (let i = 0; i < pts.length; i++) {
+        const bodyPart = pts[i];
+        if (!bodyPart || bodyPart.dying) continue;
 
-      // Calculate weighted velocity (more recent = higher weight)
-      let avgVelocity = { x: 0, y: 0 };
-      let totalWeight = 0;
-      
-      for (let i = 1; i < recent.length; i++) {
-        const dt = (recent[i].time - recent[i-1].time) / 1000;
-        if (dt > 0) {
-          const weight = i; // More recent frames have higher weight
-          const velX = (recent[i].position.x - recent[i-1].position.x) / dt;
-          const velY = (recent[i].position.y - recent[i-1].position.y) / dt;
-          
-          avgVelocity.x += velX * weight;
-          avgVelocity.y += velY * weight;
-          totalWeight += weight;
+        const bodyDistance = Math.sqrt(getDistance2(headPos.x, headPos.y, bodyPart.xx, bodyPart.yy));
+        if (bodyDistance < safeDistance) {
+          const approachAngle = this.calculateApproachAngle(headPos, { x: bodyPart.xx, y: bodyPart.yy }, lookAheadVector);
+          const dangerLevel = this.calculateDangerLevel(bodyDistance, safeDistance, approachAngle);
+
+          this.dangerZones.push({
+            point: { x: bodyPart.xx, y: bodyPart.yy },
+            distance: bodyDistance,
+            radius: safeDistance,
+            approachAngle: approachAngle,
+            dangerLevel: dangerLevel,
+            type: 'snake_body', // Mark as body part for orange dot visualization
+            bodyIndex: i
+          });
         }
       }
-
-      if (totalWeight > 0) {
-        avgVelocity.x /= totalWeight;
-        avgVelocity.y /= totalWeight;
-      }
-
-      // Add momentum factor for fast-moving snakes
-      let momentumFactor = 1.0;
-      if (isFastMoving) {
-        // Fast snakes continue their trajectory longer
-        momentumFactor = 1.3 + (currentSpeed - 7.0) * 0.1;
-      }
-
-      // Predict future position with momentum
-      const predictionTime = timeHorizon * momentumFactor;
-      return {
-        x: latest.position.x + avgVelocity.x * predictionTime,
-        y: latest.position.y + avgVelocity.y * predictionTime
-      };
     }
 
     // Adjust collision parameters based on snake speed and size
@@ -416,134 +413,9 @@ The MIT License (MIT)
       this.dangerZoneRadius += speedBonus * 0.6;
     }
 
-    // Enhanced collision prediction with moving target support
-    predictEnhancedCollisions(headPos, headAngle, snakeRadius, snakeSpeed, snakes, borderSize) {
-      const lookAheadVector = {
-        x: Math.cos(headAngle) * this.lookaheadDistance,
-        y: Math.sin(headAngle) * this.lookaheadDistance
-      };
 
-      // Check collision with other snakes using moving target prediction
-      for (const snake of snakes) {
-        if (!snake || snake.id === window.slither.id) continue;
 
-        const currentSpeed = snake.sp || 5.78;
-        const isBoosting = currentSpeed > this.boostSpeedThreshold;
 
-        // Predict where the snake will be
-        const predictedPosition = this.predictSnakePosition(snake, this.predictionTimeHorizon);
-        const predictedSpeed = isBoosting ? Math.min(currentSpeed * 1.2, this.maxBoostSpeed) : currentSpeed;
-
-        // Create prediction object
-        const prediction = {
-          currentlyBoosting: isBoosting,
-          willBoost: isBoosting,
-          confidence: isBoosting ? 0.9 : 0.5,
-          predictedSpeed: predictedSpeed,
-          predictedPosition: predictedPosition
-        };
-
-        this.checkEnhancedSnakeCollision(headPos, lookAheadVector, snakeRadius, snakeSpeed, snake, predictedSpeed, prediction);
-      }
-
-      // Check collision with borders
-      this.checkBorderCollision(headPos, lookAheadVector, snakeRadius, borderSize);
-    }
-
-    // Enhanced snake collision detection with moving target prediction
-    checkEnhancedSnakeCollision(headPos, lookAheadVector, snakeRadius, snakeSpeed, targetSnake, predictedSpeed, prediction) {
-      if (!targetSnake.pts || targetSnake.pts.length < 1) return;
-
-      const targetRadius = this.getSnakeWidth(targetSnake.sc) / 2;
-      const baseSafeDistance = snakeRadius + targetRadius + this.safetyMargin;
-
-      // Advanced speed-based safety calculations
-      const mySpeed = snakeSpeed;
-      const isBoosting = mySpeed > 6.0;
-      const targetIsBoosting = prediction.currentlyBoosting;
-      
-      // Calculate combined speed factor for safety distance
-      let speedMultiplier = 1.0;
-      if (isBoosting && targetIsBoosting) {
-        speedMultiplier = 3.5; // Both boosting - very dangerous
-      } else if (isBoosting || targetIsBoosting) {
-        speedMultiplier = 2.5; // One boosting - dangerous
-      } else {
-        speedMultiplier = 1.5; // Normal speeds
-      }
-      
-      // Add extra margin based on relative speeds
-      const relativeSpeed = Math.abs(mySpeed - predictedSpeed);
-      const speedBonus = Math.min(relativeSpeed * 10, 50); // Max 50 extra pixels
-      
-      const safeDistance = baseSafeDistance * speedMultiplier + speedBonus;
-
-      // Check collision with predicted head position
-      const predictedPos = prediction.predictedPosition;
-      if (predictedPos) {
-        const headDistance = Math.sqrt(getDistance2(headPos.x, headPos.y, predictedPos.x, predictedPos.y));
-        if (headDistance < safeDistance) {
-          const approachAngle = this.calculateApproachAngle(headPos, predictedPos, lookAheadVector);
-          const dangerLevel = this.calculateDangerLevel(headDistance, safeDistance, approachAngle);
-
-          this.dangerZones.push({
-            point: predictedPos,
-            originalPoint: { x: targetSnake.xx, y: targetSnake.yy },
-            distance: headDistance,
-            radius: safeDistance,
-            approachAngle: approachAngle,
-            dangerLevel: dangerLevel,
-            type: 'moving_snake',
-            isBoosting: prediction.currentlyBoosting,
-            predictedSpeed: predictedSpeed,
-            boostPrediction: prediction,
-            snakeId: targetSnake.id
-          });
-        }
-      }
-
-      // Check collision with current head position (fallback)
-      const currentHeadDistance = Math.sqrt(getDistance2(headPos.x, headPos.y, targetSnake.xx, targetSnake.yy));
-      if (currentHeadDistance < safeDistance) {
-        const approachAngle = this.calculateApproachAngle(headPos, { x: targetSnake.xx, y: targetSnake.yy }, lookAheadVector);
-        const dangerLevel = this.calculateDangerLevel(currentHeadDistance, safeDistance, approachAngle);
-
-        this.dangerZones.push({
-          point: { x: targetSnake.xx, y: targetSnake.yy },
-          distance: currentHeadDistance,
-          radius: safeDistance,
-          approachAngle: approachAngle,
-          dangerLevel: dangerLevel,
-          type: 'snake',
-          isBoosting: prediction.currentlyBoosting,
-          predictedSpeed: predictedSpeed,
-          snakeId: targetSnake.id
-        });
-      }
-
-      // Check snake body collision - mark dangerous body parts with orange dots
-      const pts = targetSnake.pts;
-      for (let i = 0; i < pts.length; i++) {
-        const bodyPart = pts[i];
-        if (!bodyPart || bodyPart.dying) continue;
-
-        const bodyDistance = Math.sqrt(getDistance2(headPos.x, headPos.y, bodyPart.xx, bodyPart.yy));
-        if (bodyDistance < safeDistance) {
-          const approachAngle = this.calculateApproachAngle(headPos, { x: bodyPart.xx, y: bodyPart.yy }, lookAheadVector);
-          const dangerLevel = this.calculateDangerLevel(bodyDistance, safeDistance, approachAngle);
-
-          this.dangerZones.push({
-            point: { x: bodyPart.xx, y: bodyPart.yy },
-            distance: bodyDistance,
-            radius: safeDistance,
-            approachAngle: approachAngle,
-            dangerLevel: dangerLevel,
-            type: 'snake_body', // Mark as body part for orange dot visualization
-            bodyIndex: i
-          });
-        }
-      }
-    }
 
     // Helper method to get snake width (copied from bot)
     getSnakeWidth(sc) {
@@ -684,8 +556,8 @@ The MIT License (MIT)
         // Always include very close dangers
         if (danger.distance < danger.radius * 2) return true;
         
-        // For moving snakes, only include if they're on collision course
-        if (danger.type === 'moving_snake' || danger.type === 'snake') {
+        // For snakes, only include if they're on collision course
+        if (danger.type === 'snake') {
           const snake = window.slithers.find(s => s.id === danger.snakeId);
           if (snake) {
             const vectorToUs = fastAtan2(headPos.y - snake.yy, headPos.x - snake.xx);
@@ -759,26 +631,8 @@ The MIT License (MIT)
             isValidThreat = false;
           }
           
-          // Check for erratic movement (circling/turning) - use position-based approach instead
-          const history = this.snakeHistory.get(snake.id);
-          if (history && history.length >= 3) {
-            const recent = history.slice(-3);
-            let angleChanges = 0;
-            for (let i = 1; i < recent.length; i++) {
-              const angleDiff = Math.abs(this.angleDifference(recent[i].angle, recent[i-1].angle));
-              if (angleDiff > Math.PI / 6) angleChanges++; // > 30° change
-            }
-            
-            // If snake changed direction significantly in recent frames, use position-based approach
-            if (angleChanges >= 2) {
-              const obstacleAngle = fastAtan2(danger.point.y - headPos.y, danger.point.x - headPos.x);
-              approachAngle = obstacleAngle + Math.PI;
-            } else {
-              approachAngle = snake.ang;
-            }
-          } else {
-            approachAngle = snake.ang;
-          }
+          // Use snake's current movement direction
+          approachAngle = snake.ang;
         } else {
           // Fallback: calculate approach from relative position
           const obstacleAngle = fastAtan2(danger.point.y - headPos.y, danger.point.x - headPos.x);
@@ -878,7 +732,7 @@ The MIT License (MIT)
             danger.dangerLevel
           );
         } else {
-          const color = danger.type === 'snake' || danger.type === 'moving_snake' ? 'red' : 'orange';
+          const color = danger.type === 'snake' ? 'red' : 'orange';
           const alpha = danger.dangerLevel;
 
           this.visualizer.drawCircle(
