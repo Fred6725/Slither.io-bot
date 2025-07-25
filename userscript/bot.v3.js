@@ -472,7 +472,7 @@ The MIT License (MIT)
       }
     }
 
-    // Calculate time to reach a point on an arc
+    // Calculate time to reach a point on an arc - IMPROVED for real-time accuracy
     calculateTimeToPoint(arc, point) {
       const center = arc.center;
       const snake = arc.snake;
@@ -490,8 +490,14 @@ The MIT License (MIT)
       // Convert angular distance to arc length
       const arcDistance = angularDistance * arc.radius;
       
-      // Time = distance / speed
-      return arcDistance / currentSpeed;
+      // IMPROVED: Account for potential speed changes
+      // Add safety margin for boost acceleration
+      const isBoosting = currentSpeed > 6.0;
+      const speedSafetyFactor = isBoosting ? 1.5 : 1.2; // Assume potential speed increase
+      const effectiveSpeed = currentSpeed * speedSafetyFactor;
+      
+      // Time = distance / effective speed (more conservative)
+      return arcDistance / effectiveSpeed;
     }
 
     // Determine winner in a collision scenario
@@ -631,24 +637,57 @@ The MIT License (MIT)
     // Phase 3: Combat Decision Engine  
     // =====================================
 
+    // Check if this is a valid head-to-head combat situation (not attacking body)
+    isHeadToHeadCombat(mySnake, enemySnake, distance) {
+      // Only engage if:
+      // 1. Close range combat (heads approaching each other)
+      // 2. Both snakes moving towards each other
+      // 3. Not attacking from behind or sides into body
+      
+      const myHeadAngle = mySnake.ang;
+      const enemyHeadAngle = enemySnake.ang;
+      
+      // Calculate angle from my head to enemy head
+      const angleToEnemy = fastAtan2(enemySnake.yy - mySnake.yy, enemySnake.xx - mySnake.xx);
+      const angleFromEnemy = fastAtan2(mySnake.yy - enemySnake.yy, mySnake.xx - enemySnake.xx);
+      
+      // Check if I'm heading towards enemy head (not body)
+      const myHeadingDiff = Math.abs(this.angleDifference(myHeadAngle, angleToEnemy));
+      
+      // Check if enemy is heading towards me
+      const enemyHeadingDiff = Math.abs(this.angleDifference(enemyHeadAngle, angleFromEnemy));
+      
+      // Only engage in head-to-head combat scenarios
+      const isHeadToHead = myHeadingDiff < Math.PI / 3 && enemyHeadingDiff < Math.PI / 3; // Both within 60°
+      const isCloseRange = distance < 400; // Close enough for head-to-head
+      
+      return isHeadToHead && isCloseRange;
+    }
+
     // Evaluate overall combat situation
     evaluateCombatSituation(mySnake, allSnakes, headPos, headAngle, snakeRadius) {
-      const combatRange = 800; // Analyze enemies within this range
+      const combatRange = 600; // Reduced range for more focused combat
       const nearbyEnemies = [];
       
-      // Find nearby enemy snakes
+      // Find nearby enemy snakes - ONLY analyze HEAD-TO-HEAD combat
       for (const snake of allSnakes) {
         if (!snake || snake.id === mySnake.id) continue;
         
         const distance = Math.sqrt(getDistance2(headPos.x, headPos.y, snake.xx, snake.yy));
         if (distance <= combatRange) {
-          const analysis = this.analyzeTrajectoryCollision(snake);
-          if (analysis) {
-            nearbyEnemies.push({
-              snake: snake,
-              distance: distance,
-              analysis: analysis
-            });
+          // CRITICAL: Only engage in head-to-head combat, not against bodies
+          const isHeadToHeadCombat = this.isHeadToHeadCombat(mySnake, snake, distance);
+          
+          if (isHeadToHeadCombat) {
+            const analysis = this.analyzeTrajectoryCollision(snake);
+            if (analysis) {
+              nearbyEnemies.push({
+                snake: snake,
+                distance: distance,
+                analysis: analysis,
+                isHeadToHead: true
+              });
+            }
           }
         }
       }
@@ -661,12 +700,30 @@ The MIT License (MIT)
         };
       }
       
-      // Categorize threats and opportunities
+      // Categorize threats and opportunities - MUCH more conservative
       const highThreats = nearbyEnemies.filter(e => e.analysis.threat === 'HIGH');
-      const attackOpportunities = nearbyEnemies.filter(e => e.analysis.threat === 'LOW' && 
-        e.analysis.recommendation === 'ATTACK_OPPORTUNITY');
       
-      // Decision priority: Safety first, then opportunities
+      // CRITICAL: Much stricter attack criteria to prevent death
+      const attackOpportunities = nearbyEnemies.filter(e => {
+        if (e.analysis.threat !== 'LOW' || e.analysis.recommendation !== 'ATTACK_OPPORTUNITY') {
+          return false;
+        }
+        
+        // Must have significant time advantage (at least 300ms)
+        const timeDiff = e.analysis.criticalCollision?.timeDifference || 0;
+        const hasSignificantAdvantage = timeDiff < -0.3;
+        
+        // Enemy must not be boosting (too risky if they can accelerate)
+        const enemySpeed = e.snake.sp || 5.78;
+        const enemyNotBoosting = enemySpeed <= 6.0;
+        
+        // Must be true head-to-head (verified again)
+        const isSafeHeadToHead = e.isHeadToHead;
+        
+        return hasSignificantAdvantage && enemyNotBoosting && isSafeHeadToHead;
+      });
+      
+      // Decision priority: Safety ALWAYS first
       if (highThreats.length > 0) {
         const closestThreat = highThreats.reduce((min, current) => 
           current.distance < min.distance ? current : min
@@ -676,11 +733,12 @@ The MIT License (MIT)
           mode: 'EMERGENCY_DEFENSE',
           hasOpportunity: true,
           target: closestThreat,
-          reason: `High threat at ${closestThreat.distance.toFixed(0)}px`,
+          reason: `High threat at ${closestThreat.distance.toFixed(0)}px - ESCAPING`,
           escapeRoutes: closestThreat.analysis.escapeRoutes
         };
       }
       
+      // Only attack with OVERWHELMING advantage
       if (attackOpportunities.length > 0) {
         const bestOpportunity = attackOpportunities.reduce((best, current) => {
           const bestTime = best.analysis.criticalCollision?.timeDifference || 0;
@@ -688,13 +746,17 @@ The MIT License (MIT)
           return currentTime < bestTime ? current : best; // More advantage = more negative time
         });
         
-        return {
-          mode: 'AGGRESSIVE_ATTACK',
-          hasOpportunity: true,
-          target: bestOpportunity,
-          reason: `Attack opportunity with ${Math.abs(bestOpportunity.analysis.criticalCollision?.timeDifference || 0).toFixed(2)}s advantage`,
-          attackPoint: bestOpportunity.analysis.criticalCollision?.intersectionPoint
-        };
+        // Double-check the advantage is still valid
+        const advantage = Math.abs(bestOpportunity.analysis.criticalCollision?.timeDifference || 0);
+        if (advantage >= 0.3) {
+          return {
+            mode: 'AGGRESSIVE_ATTACK',
+            hasOpportunity: true,
+            target: bestOpportunity,
+            reason: `SAFE attack - ${advantage.toFixed(2)}s advantage, enemy not boosting`,
+            attackPoint: bestOpportunity.analysis.criticalCollision?.intersectionPoint
+          };
+        }
       }
       
       // Medium threats - tactical maneuvering
@@ -763,27 +825,32 @@ The MIT License (MIT)
       return this.calculateFullControlAvoidance(headPos, headAngle, snakeRadius);
     }
 
-    // Execute aggressive attack maneuvers  
+    // Execute aggressive attack maneuvers - MUCH more conservative
     executeAggressiveAttack(headPos, headAngle, snakeRadius, combatDecision) {
       const target = combatDecision.target;
       const attackPoint = combatDecision.attackPoint;
       
       if (attackPoint) {
-        // Calculate direction to attack point
-        const attackDirection = fastAtan2(attackPoint.y - headPos.y, attackPoint.x - headPos.x);
-        
-        // Verify we still have time advantage
+        // CRITICAL: Re-verify attack is still safe in real-time
         const currentAnalysis = this.analyzeTrajectoryCollision(target.snake);
-        if (currentAnalysis && currentAnalysis.criticalCollision && 
-            currentAnalysis.criticalCollision.timeDifference < -0.05) {
-          
-          console.log(`⚔️ ATTACK: Intercepting at collision point`);
+        const currentEnemySpeed = target.snake.sp || 5.78;
+        
+        // Must maintain SIGNIFICANT advantage and enemy must not be boosting
+        const stillSafe = currentAnalysis && 
+                         currentAnalysis.criticalCollision && 
+                         currentAnalysis.criticalCollision.timeDifference < -0.25 && // 250ms minimum advantage
+                         currentEnemySpeed <= 6.0; // Enemy not boosting
+        
+        if (stillSafe) {
+          // Calculate direction to attack point
+          const attackDirection = fastAtan2(attackPoint.y - headPos.y, attackPoint.x - headPos.x);
+          console.log(`⚔️ SAFE ATTACK: ${Math.abs(currentAnalysis.criticalCollision.timeDifference).toFixed(3)}s advantage`);
           return attackDirection;
         }
       }
       
-      // Attack opportunity lost or invalid - revert to defense
-      console.log(`⚠️ ATTACK ABORTED: Conditions changed, reverting to defense`);
+      // Attack no longer safe - immediately switch to defense
+      console.log(`🛡️ ATTACK ABORTED: Switching to emergency defense`);
       return this.calculateFullControlAvoidance(headPos, headAngle, snakeRadius);
     }
 
