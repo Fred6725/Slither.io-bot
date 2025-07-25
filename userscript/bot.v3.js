@@ -3064,6 +3064,39 @@ The MIT License (MIT)
         }
       }
 
+      // Run combat mode independently when enabled (works with or without bot/collision avoidance)
+      if (window.playing && collisionAvoidance.combatModeEnabled && window.slither) {
+        // Get combat decision without full collision detection
+        const combatDecision = collisionAvoidance.evaluateCombatSituation(
+          window.slither,
+          window.slithers,
+          { x: window.slither.xx, y: window.slither.yy },
+          window.slither.ang,
+          collisionAvoidance.getSnakeWidth(window.slither.sc) / 2
+        );
+
+        // Only take control during combat situations
+        if (combatDecision.hasOpportunity) {
+          const combatDirection = collisionAvoidance.calculateCombatAwareDirection(
+            { x: window.slither.xx, y: window.slither.yy },
+            window.slither.ang,
+            collisionAvoidance.getSnakeWidth(window.slither.sc) / 2,
+            combatDecision
+          );
+
+          if (combatDirection !== null) {
+            // Combat mode takes control
+            const newX = window.slither.xx + Math.cos(combatDirection) * 100;
+            const newY = window.slither.yy + Math.sin(combatDirection) * 100;
+
+            window.xm = newX - window.view_xx;
+            window.ym = newY - window.view_yy;
+
+            console.log(`🎯 COMBAT CONTROL: ${combatDecision.mode} - Direction ${(combatDirection * 180 / Math.PI).toFixed(1)}°`);
+          }
+        }
+      }
+
       // Always run visual debugging if enabled
       if (window.playing && collisionAvoidance.visualsEnabled && window.slither) {
         collisionAvoidance.drawDebugVisuals(
