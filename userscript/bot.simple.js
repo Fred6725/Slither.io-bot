@@ -43,6 +43,93 @@ The MIT License (MIT)
       this.foodThreshold = 300; // Distance to look for food
     }
 
+    // TRAJECTORY COLLISION MATH (from our advanced version)
+    checkTrajectoryCollision(x1, y1, speed1, angle1, x2, y2, speed2, angle2, timeHorizon) {
+      // Convert to velocity vectors
+      const vx1 = Math.cos(angle1) * speed1;
+      const vy1 = Math.sin(angle1) * speed1;
+      const vx2 = Math.cos(angle2) * speed2;
+      const vy2 = Math.sin(angle2) * speed2;
+      
+      // Relative position and velocity
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const dvx = vx2 - vx1;
+      const dvy = vy2 - vy1;
+      
+      // Quadratic equation coefficients for closest approach
+      const a = dvx * dvx + dvy * dvy;
+      const b = 2 * (dx * dvx + dy * dvy);
+      const c = dx * dx + dy * dy;
+      
+      // If velocities are identical, check current distance
+      if (Math.abs(a) < 1e-10) {
+        const distance = Math.sqrt(c);
+        const collisionRadius = 30; // Snake collision radius
+        return {
+          willCollide: distance < collisionRadius,
+          timeToCollision: distance < collisionRadius ? 0 : Infinity,
+          closestDistance: distance
+        };
+      }
+      
+      // Time of closest approach
+      const t = -b / (2 * a);
+      
+      // Check if collision happens within time horizon
+      if (t < 0 || t > timeHorizon) {
+        return { willCollide: false, timeToCollision: Infinity, closestDistance: Infinity };
+      }
+      
+      // Distance at closest approach
+      const closestDistance = Math.sqrt(a * t * t + b * t + c);
+      const collisionRadius = 25; // Collision threshold
+      
+      return {
+        willCollide: closestDistance < collisionRadius,
+        timeToCollision: closestDistance < collisionRadius ? t : Infinity,
+        closestDistance: closestDistance
+      };
+    }
+    
+    // Check collision with static point (body parts)
+    checkLineToPointCollision(x, y, speed, angle, pointX, pointY, timeHorizon) {
+      const vx = Math.cos(angle) * speed;
+      const vy = Math.sin(angle) * speed;
+      
+      // Vector from current position to point
+      const dx = pointX - x;
+      const dy = pointY - y;
+      
+      // Project point onto trajectory line
+      const dotProduct = dx * vx + dy * vy;
+      const velocityMagnitudeSquared = vx * vx + vy * vy;
+      
+      if (velocityMagnitudeSquared < 1e-10) {
+        return { willCollide: false, timeToCollision: Infinity };
+      }
+      
+      const t = dotProduct / velocityMagnitudeSquared;
+      
+      // Check if collision point is in the future and within time horizon
+      if (t < 0 || t > timeHorizon) {
+        return { willCollide: false, timeToCollision: Infinity };
+      }
+      
+      // Calculate closest point on trajectory
+      const closestX = x + vx * t;
+      const closestY = y + vy * t;
+      
+      // Distance from point to trajectory
+      const distance = getDistance(pointX, pointY, closestX, closestY);
+      const collisionRadius = 20; // Body collision radius
+      
+      return {
+        willCollide: distance < collisionRadius,
+        timeToCollision: distance < collisionRadius ? t : Infinity
+      };
+    }
+
     // Get our snake
     getMySnake() {
       return window.snake;
@@ -76,65 +163,101 @@ The MIT License (MIT)
       return food;
     }
 
-    // Check if position is dangerous (near any snake)
-    isDangerous(x, y) {
+    // IMPROVED: Check if trajectory leads to collision (not just distance)
+    isDangerous(x, y, mySpeed, myAngle, timeHorizon = 2.0) {
+      const mySnake = this.getMySnake();
       const snakes = this.getOtherSnakes();
       
       for (const snake of snakes) {
         if (!snake || !snake.xx || !snake.yy) continue;
         
-        // Check head
-        const headDist = getDistance(x, y, snake.xx, snake.yy);
-        if (headDist < this.dangerThreshold) {
-          return true;
+        // Skip our own snake parts (fix for detecting own head)
+        if (snake.id === mySnake.id) continue;
+        
+        // Get enemy trajectory
+        const enemySpeed = snake.sp || 5.78;
+        const enemyAngle = snake.ang || 0;
+        
+        // Check trajectory collision with enemy HEAD
+        const headCollision = this.checkTrajectoryCollision(
+          x, y, mySpeed, myAngle,
+          snake.xx, snake.yy, enemySpeed, enemyAngle,
+          timeHorizon
+        );
+        
+        if (headCollision.willCollide && headCollision.timeToCollision < timeHorizon) {
+          return { 
+            dangerous: true, 
+            type: 'HEAD', 
+            timeToCollision: headCollision.timeToCollision,
+            snake: snake 
+          };
         }
         
-        // Check body parts
+        // Check body collision (static obstacles)
         if (snake.pts) {
           for (let i = 0; i < snake.pts.length; i += 2) {
             const bodyX = snake.pts[i];
             const bodyY = snake.pts[i + 1];
-            const bodyDist = getDistance(x, y, bodyX, bodyY);
-            if (bodyDist < this.dangerThreshold * 0.7) { // Closer to body = more dangerous
-              return true;
+            
+            // Check if our trajectory passes through body
+            const bodyCollision = this.checkLineToPointCollision(
+              x, y, mySpeed, myAngle, bodyX, bodyY, timeHorizon
+            );
+            
+            if (bodyCollision.willCollide) {
+              return { 
+                dangerous: true, 
+                type: 'BODY', 
+                timeToCollision: bodyCollision.timeToCollision,
+                snake: snake 
+              };
             }
           }
         }
       }
-      return false;
+      return { dangerous: false };
     }
 
-    // Find safe direction
-    findSafeDirection(myX, myY, currentAngle) {
+    // Find safe direction using trajectory analysis
+    findSafeDirection(myX, myY, currentAngle, mySpeed) {
       const checkAngles = [];
-      const angleStep = Math.PI / 8; // 22.5 degrees
+      const angleStep = Math.PI / 12; // 15 degrees - more precision
       
       // Check current direction first
       checkAngles.push(currentAngle);
       
       // Check nearby angles
-      for (let i = 1; i <= 8; i++) {
+      for (let i = 1; i <= 12; i++) {
         checkAngles.push(currentAngle + angleStep * i);
         checkAngles.push(currentAngle - angleStep * i);
       }
       
-      // Find first safe direction
+      // Adjust time horizon based on speed (boost detection fix!)
+      const timeHorizon = mySpeed > 7 ? 1.0 : 2.0; // Shorter horizon when boosting
+      
+      // Find safest direction (considering time to collision)
+      let bestAngle = currentAngle;
+      let bestTimeToCollision = 0;
+      
       for (const angle of checkAngles) {
-        const checkDistance = this.dangerThreshold * 1.5;
-        const checkX = myX + Math.cos(angle) * checkDistance;
-        const checkY = myY + Math.sin(angle) * checkDistance;
+        const danger = this.isDangerous(myX, myY, mySpeed, angle, timeHorizon);
         
-        if (!this.isDangerous(checkX, checkY)) {
-          return angle;
+        if (!danger.dangerous) {
+          return angle; // Found completely safe direction
+        } else if (danger.timeToCollision > bestTimeToCollision) {
+          // This direction gives us more time before collision
+          bestAngle = angle;
+          bestTimeToCollision = danger.timeToCollision;
         }
       }
       
-      // If nothing is safe, try opposite direction
-      return currentAngle + Math.PI;
+      // If no perfectly safe direction, choose the one that gives most time
+      return bestAngle;
     }
 
-    // Find nearest food
-    findNearestFood(myX, myY) {
+    // Find nearest safe food using trajectory
+    findNearestFood(myX, myY, mySpeed) {
       const food = this.getFood();
       let nearest = null;
       let nearestDist = Infinity;
@@ -142,8 +265,11 @@ The MIT License (MIT)
       for (const f of food) {
         const dist = getDistance(myX, myY, f.x, f.y);
         if (dist < this.foodThreshold && dist < nearestDist) {
-          // Check if food is safe to reach
-          if (!this.isDangerous(f.x, f.y)) {
+          // Check if trajectory to food is safe
+          const foodAngle = fastAtan2(f.y - myY, f.x - myX);
+          const danger = this.isDangerous(myX, myY, mySpeed, foodAngle);
+          
+          if (!danger.dangerous) {
             nearest = f;
             nearestDist = dist;
           }
@@ -195,12 +321,15 @@ The MIT License (MIT)
       const myX = mySnake.xx;
       const myY = mySnake.yy;
       const currentAngle = mySnake.ang || 0;
+      const mySpeed = mySnake.sp || 5.78;
 
-      // Priority 1: SAFETY - avoid danger
-      if (this.isDangerous(myX, myY)) {
+      // Priority 1: SAFETY - check trajectory-based danger
+      const currentDanger = this.isDangerous(myX, myY, mySpeed, currentAngle);
+      
+      if (currentDanger.dangerous) {
         this.mode = 'SAFE';
-        const safeDirection = this.findSafeDirection(myX, myY, currentAngle);
-        console.log(`🛡️ DANGER DETECTED - Escaping`);
+        const safeDirection = this.findSafeDirection(myX, myY, currentAngle, mySpeed);
+        console.log(`🛡️ TRAJECTORY DANGER: ${currentDanger.type} in ${currentDanger.timeToCollision.toFixed(2)}s - Escaping`);
         this.lastDirection = safeDirection;
         return safeDirection;
       }
@@ -215,34 +344,30 @@ The MIT License (MIT)
       }
 
       // Priority 3: FOOD - collect food
-      const food = this.findNearestFood(myX, myY);
+      const food = this.findNearestFood(myX, myY, mySpeed);
       if (food) {
         this.mode = 'FOOD';
         const foodAngle = fastAtan2(food.y - myY, food.x - myX);
         
-        // Check if path to food is safe
-        const pathSafe = !this.isDangerous(
-          myX + Math.cos(foodAngle) * 100,
-          myY + Math.sin(foodAngle) * 100
-        );
+        // Check if trajectory to food is safe
+        const foodDanger = this.isDangerous(myX, myY, mySpeed, foodAngle);
         
-        if (pathSafe) {
+        if (!foodDanger.dangerous) {
           this.lastDirection = foodAngle;
           return foodAngle;
         }
       }
 
-      // Default: continue current direction if safe
-      const checkX = myX + Math.cos(currentAngle) * 100;
-      const checkY = myY + Math.sin(currentAngle) * 100;
+      // Default: continue current direction if trajectory is safe
+      const continueDanger = this.isDangerous(myX, myY, mySpeed, currentAngle);
       
-      if (!this.isDangerous(checkX, checkY)) {
+      if (!continueDanger.dangerous) {
         this.lastDirection = currentAngle;
         return currentAngle;
       }
 
       // Find any safe direction
-      const safeDirection = this.findSafeDirection(myX, myY, currentAngle);
+      const safeDirection = this.findSafeDirection(myX, myY, currentAngle, mySpeed);
       this.lastDirection = safeDirection;
       return safeDirection;
     }
