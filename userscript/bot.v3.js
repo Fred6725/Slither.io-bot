@@ -399,6 +399,513 @@ The MIT License (MIT)
     // =====================================
     // Phase 2: Trajectory Collision Math
     // =====================================
+<<<<<<< HEAD
+=======
+
+    // Calculate intersection points between two turn arcs
+    calculateArcIntersections(arc1, arc2) {
+      const intersections = [];
+      
+      // Get circle centers and radii
+      const c1 = arc1.center;
+      const c2 = arc2.center;
+      const r1 = arc1.radius;
+      const r2 = arc2.radius;
+      
+      // Distance between centers
+      const d = Math.sqrt(getDistance2(c1.x, c1.y, c2.x, c2.y));
+      
+      // Check if circles intersect
+      if (d > r1 + r2 || d < Math.abs(r1 - r2) || d === 0) {
+        return []; // No intersection or infinite intersections
+      }
+      
+      // Calculate intersection points using circle-circle intersection formula
+      const a = (r1 * r1 - r2 * r2 + d * d) / (2 * d);
+      const h = Math.sqrt(r1 * r1 - a * a);
+      
+      // Point on line between centers
+      const px = c1.x + a * (c2.x - c1.x) / d;
+      const py = c1.y + a * (c2.y - c1.y) / d;
+      
+      // Calculate both intersection points
+      const intersection1 = {
+        x: px + h * (c2.y - c1.y) / d,
+        y: py - h * (c2.x - c1.x) / d
+      };
+      
+      const intersection2 = {
+        x: px - h * (c2.y - c1.y) / d,
+        y: py + h * (c2.x - c1.x) / d
+      };
+      
+      // Check if intersections are within the arc ranges
+      if (this.isPointOnArc(intersection1, arc1) && this.isPointOnArc(intersection1, arc2)) {
+        intersections.push(intersection1);
+      }
+      
+      if (this.isPointOnArc(intersection2, arc1) && this.isPointOnArc(intersection2, arc2)) {
+        intersections.push(intersection2);
+      }
+      
+      return intersections;
+    }
+
+    // Check if a point lies on a specific arc (not just the full circle)
+    isPointOnArc(point, arc) {
+      const center = arc.center;
+      const angleToPoint = fastAtan2(point.y - center.y, point.x - center.x);
+      
+      // Calculate the arc's angle range
+      const startAngle = arc.startAngle + arc.direction * Math.PI / 2 + Math.PI;
+      const endAngle = startAngle + arc.direction * this.arcLength;
+      
+      // Normalize angles to [0, 2π]
+      const normalizedAngleToPoint = ((angleToPoint % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      const normalizedStartAngle = ((startAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      const normalizedEndAngle = ((endAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      
+      // Check if point angle is within arc range
+      if (normalizedStartAngle <= normalizedEndAngle) {
+        return normalizedAngleToPoint >= normalizedStartAngle && normalizedAngleToPoint <= normalizedEndAngle;
+      } else {
+        // Arc crosses 0° boundary
+        return normalizedAngleToPoint >= normalizedStartAngle || normalizedAngleToPoint <= normalizedEndAngle;
+      }
+    }
+
+    // Calculate time to reach a point on an arc - IMPROVED for real-time accuracy
+    calculateTimeToPoint(arc, point) {
+      const center = arc.center;
+      const snake = arc.snake;
+      const currentSpeed = snake.sp || 5.78;
+      
+      // Calculate angle from current position to target point
+      const currentAngle = fastAtan2(snake.yy - center.y, snake.xx - center.x);
+      const targetAngle = fastAtan2(point.y - center.y, point.x - center.x);
+      
+      // Calculate angular distance (considering direction)
+      let angularDistance = this.angleDifference(targetAngle, currentAngle);
+      if (arc.direction < 0) angularDistance = -angularDistance;
+      angularDistance = Math.abs(angularDistance);
+      
+      // Convert angular distance to arc length
+      const arcDistance = angularDistance * arc.radius;
+      
+      // IMPROVED: Account for potential speed changes
+      // Add safety margin for boost acceleration
+      const isBoosting = currentSpeed > 6.0;
+      const speedSafetyFactor = isBoosting ? 1.5 : 1.2; // Assume potential speed increase
+      const effectiveSpeed = currentSpeed * speedSafetyFactor;
+      
+      // Time = distance / effective speed (more conservative)
+      return arcDistance / effectiveSpeed;
+    }
+
+    // Determine winner in a collision scenario
+    determineCollisionWinner(myArc, enemyArc, intersectionPoint) {
+      const myTimeToCollision = this.calculateTimeToPoint(myArc, intersectionPoint);
+      const enemyTimeToCollision = this.calculateTimeToPoint(enemyArc, intersectionPoint);
+      
+      const timeDifference = myTimeToCollision - enemyTimeToCollision;
+      const SAFETY_MARGIN = 0.1; // 100ms safety margin
+      
+      return {
+        myTime: myTimeToCollision,
+        enemyTime: enemyTimeToCollision,
+        timeDifference: timeDifference,
+        isSafe: timeDifference < -SAFETY_MARGIN, // We arrive significantly earlier
+        isWinning: timeDifference < 0, // We arrive first
+        isDangerous: timeDifference > SAFETY_MARGIN, // They arrive significantly earlier
+        intersectionPoint: intersectionPoint
+      };
+    }
+
+    // Validate if escape routes are available
+    validateEscapeRoutes(mySnake, enemySnake, dangerScenario) {
+      const escapeRoutes = [];
+      
+      // Calculate alternative arcs (different turn directions)
+      const myLeftArc = this.calculateTurnArc(mySnake, -1);
+      const myRightArc = this.calculateTurnArc(mySnake, 1);
+      const enemyLeftArc = this.calculateTurnArc(enemySnake, -1);
+      const enemyRightArc = this.calculateTurnArc(enemySnake, 1);
+      
+      // Test all combinations
+      const arcCombinations = [
+        { my: myLeftArc, enemy: enemyLeftArc, name: 'My Left vs Enemy Left' },
+        { my: myLeftArc, enemy: enemyRightArc, name: 'My Left vs Enemy Right' },
+        { my: myRightArc, enemy: enemyLeftArc, name: 'My Right vs Enemy Left' },
+        { my: myRightArc, enemy: enemyRightArc, name: 'My Right vs Enemy Right' }
+      ];
+      
+      for (const combo of arcCombinations) {
+        const intersections = this.calculateArcIntersections(combo.my, combo.enemy);
+        
+        if (intersections.length === 0) {
+          // No collision - safe route
+          escapeRoutes.push({
+            route: combo.name,
+            arc: combo.my,
+            safety: 'SAFE',
+            reason: 'No trajectory intersection'
+          });
+        } else {
+          // Check timing for each intersection
+          for (const intersection of intersections) {
+            const result = this.determineCollisionWinner(combo.my, combo.enemy, intersection);
+            
+            escapeRoutes.push({
+              route: combo.name,
+              arc: combo.my,
+              safety: result.isSafe ? 'SAFE' : result.isDangerous ? 'DANGEROUS' : 'RISKY',
+              timeDifference: result.timeDifference,
+              intersection: intersection,
+              details: result
+            });
+          }
+        }
+      }
+      
+      // Sort by safety (safest first)
+      escapeRoutes.sort((a, b) => {
+        const safetyOrder = { 'SAFE': 0, 'RISKY': 1, 'DANGEROUS': 2 };
+        const safetyCmp = safetyOrder[a.safety] - safetyOrder[b.safety];
+        if (safetyCmp !== 0) return safetyCmp;
+        
+        // If same safety level, prefer larger time advantage
+        return (a.timeDifference || 0) - (b.timeDifference || 0);
+      });
+      
+      return escapeRoutes;
+    }
+
+    // Main trajectory analysis for combat decisions
+    analyzeTrajectoryCollision(enemySnake) {
+      const mySnake = window.slither;
+      if (!mySnake || !enemySnake) return null;
+      
+      // Calculate current trajectory arcs
+      const myCurrentArc = this.calculateTurnArc(mySnake, mySnake.ang > 0 ? 1 : -1);
+      const enemyCurrentArc = this.calculateTurnArc(enemySnake, enemySnake.ang > 0 ? 1 : -1);
+      
+      // Find intersections
+      const intersections = this.calculateArcIntersections(myCurrentArc, enemyCurrentArc);
+      
+      if (intersections.length === 0) {
+        // No immediate collision threat on current trajectories
+        return {
+          threat: 'NONE',
+          recommendation: 'MAINTAIN_COURSE',
+          escapeRoutes: this.validateEscapeRoutes(mySnake, enemySnake, null)
+        };
+      }
+      
+      // Analyze each intersection point
+      const collisionAnalysis = [];
+      for (const intersection of intersections) {
+        const result = this.determineCollisionWinner(myCurrentArc, enemyCurrentArc, intersection);
+        collisionAnalysis.push(result);
+      }
+      
+      // Get the most critical collision (shortest time)
+      const criticalCollision = collisionAnalysis.reduce((min, current) => 
+        Math.min(min.myTime, min.enemyTime) < Math.min(current.myTime, current.enemyTime) ? min : current
+      );
+      
+      // Determine overall threat level and recommendation
+      let threat, recommendation;
+      if (criticalCollision.isSafe) {
+        threat = 'LOW';
+        recommendation = 'ATTACK_OPPORTUNITY';
+      } else if (criticalCollision.isDangerous) {
+        threat = 'HIGH';
+        recommendation = 'EMERGENCY_ESCAPE';
+      } else {
+        threat = 'MEDIUM';
+        recommendation = 'TACTICAL_MANEUVER';
+      }
+      
+      return {
+        threat: threat,
+        recommendation: recommendation,
+        criticalCollision: criticalCollision,
+        allCollisions: collisionAnalysis,
+        escapeRoutes: this.validateEscapeRoutes(mySnake, enemySnake, criticalCollision)
+      };
+    }
+
+    // =====================================
+    // Phase 3: Combat Decision Engine  
+    // =====================================
+
+    // Check if this is a valid head-to-head combat situation (not attacking body)
+    isHeadToHeadCombat(mySnake, enemySnake, distance) {
+      // Only engage if:
+      // 1. Close range combat (heads approaching each other)
+      // 2. Both snakes moving towards each other
+      // 3. Not attacking from behind or sides into body
+      
+      const myHeadAngle = mySnake.ang;
+      const enemyHeadAngle = enemySnake.ang;
+      
+      // Calculate angle from my head to enemy head
+      const angleToEnemy = fastAtan2(enemySnake.yy - mySnake.yy, enemySnake.xx - mySnake.xx);
+      const angleFromEnemy = fastAtan2(mySnake.yy - enemySnake.yy, mySnake.xx - enemySnake.xx);
+      
+      // Check if I'm heading towards enemy head (not body)
+      const myHeadingDiff = Math.abs(this.angleDifference(myHeadAngle, angleToEnemy));
+      
+      // Check if enemy is heading towards me
+      const enemyHeadingDiff = Math.abs(this.angleDifference(enemyHeadAngle, angleFromEnemy));
+      
+      // Only engage in head-to-head combat scenarios
+      const isHeadToHead = myHeadingDiff < Math.PI / 3 && enemyHeadingDiff < Math.PI / 3; // Both within 60°
+      const isCloseRange = distance < 400; // Close enough for head-to-head
+      
+      return isHeadToHead && isCloseRange;
+    }
+
+    // Evaluate overall combat situation
+    evaluateCombatSituation(mySnake, allSnakes, headPos, headAngle, snakeRadius) {
+      const combatRange = 600; // Reduced range for more focused combat
+      const nearbyEnemies = [];
+      
+      // Find nearby enemy snakes - ONLY analyze HEAD-TO-HEAD combat
+      for (const snake of allSnakes) {
+        if (!snake || snake.id === mySnake.id) continue;
+        
+        const distance = Math.sqrt(getDistance2(headPos.x, headPos.y, snake.xx, snake.yy));
+        if (distance <= combatRange) {
+          // CRITICAL: Only engage in head-to-head combat, not against bodies
+          const isHeadToHeadCombat = this.isHeadToHeadCombat(mySnake, snake, distance);
+          
+          if (isHeadToHeadCombat) {
+            const analysis = this.analyzeTrajectoryCollision(snake);
+            if (analysis) {
+              nearbyEnemies.push({
+                snake: snake,
+                distance: distance,
+                analysis: analysis,
+                isHeadToHead: true
+              });
+            }
+          }
+        }
+      }
+      
+      if (nearbyEnemies.length === 0) {
+        return { 
+          mode: 'PASSIVE', 
+          hasOpportunity: false, 
+          reason: 'No nearby enemies'
+        };
+      }
+      
+      // Categorize threats and opportunities - MUCH more conservative
+      const highThreats = nearbyEnemies.filter(e => e.analysis.threat === 'HIGH');
+      
+      // CRITICAL: Much stricter attack criteria to prevent death
+      const attackOpportunities = nearbyEnemies.filter(e => {
+        if (e.analysis.threat !== 'LOW' || e.analysis.recommendation !== 'ATTACK_OPPORTUNITY') {
+          return false;
+        }
+        
+        // Must have significant time advantage (at least 300ms)
+        const timeDiff = e.analysis.criticalCollision?.timeDifference || 0;
+        const hasSignificantAdvantage = timeDiff < -0.3;
+        
+        // Enemy must not be boosting (too risky if they can accelerate)
+        const enemySpeed = e.snake.sp || 5.78;
+        const enemyNotBoosting = enemySpeed <= 6.0;
+        
+        // Must be true head-to-head (verified again)
+        const isSafeHeadToHead = e.isHeadToHead;
+        
+        return hasSignificantAdvantage && enemyNotBoosting && isSafeHeadToHead;
+      });
+      
+      // Decision priority: Safety ALWAYS first
+      if (highThreats.length > 0) {
+        const closestThreat = highThreats.reduce((min, current) => 
+          current.distance < min.distance ? current : min
+        );
+        
+        return {
+          mode: 'EMERGENCY_DEFENSE',
+          hasOpportunity: true,
+          target: closestThreat,
+          reason: `High threat at ${closestThreat.distance.toFixed(0)}px - ESCAPING`,
+          escapeRoutes: closestThreat.analysis.escapeRoutes
+        };
+      }
+      
+      // Only attack with OVERWHELMING advantage
+      if (attackOpportunities.length > 0) {
+        const bestOpportunity = attackOpportunities.reduce((best, current) => {
+          const bestTime = best.analysis.criticalCollision?.timeDifference || 0;
+          const currentTime = current.analysis.criticalCollision?.timeDifference || 0;
+          return currentTime < bestTime ? current : best; // More advantage = more negative time
+        });
+        
+        // Double-check the advantage is still valid
+        const advantage = Math.abs(bestOpportunity.analysis.criticalCollision?.timeDifference || 0);
+        if (advantage >= 0.3) {
+          return {
+            mode: 'AGGRESSIVE_ATTACK',
+            hasOpportunity: true,
+            target: bestOpportunity,
+            reason: `SAFE attack - ${advantage.toFixed(2)}s advantage, enemy not boosting`,
+            attackPoint: bestOpportunity.analysis.criticalCollision?.intersectionPoint
+          };
+        }
+      }
+      
+      // Medium threats - tactical maneuvering
+      const mediumThreats = nearbyEnemies.filter(e => e.analysis.threat === 'MEDIUM');
+      if (mediumThreats.length > 0) {
+        const closestMedium = mediumThreats.reduce((min, current) => 
+          current.distance < min.distance ? current : min
+        );
+        
+        return {
+          mode: 'TACTICAL_MANEUVER',
+          hasOpportunity: true,
+          target: closestMedium,
+          reason: `Tactical situation at ${closestMedium.distance.toFixed(0)}px`,
+          escapeRoutes: closestMedium.analysis.escapeRoutes
+        };
+      }
+      
+      return { 
+        mode: 'PASSIVE', 
+        hasOpportunity: false, 
+        reason: 'No immediate threats or opportunities'
+      };
+    }
+
+    // Calculate direction based on combat decision
+    calculateCombatAwareDirection(headPos, headAngle, snakeRadius, combatDecision) {
+      const mySnake = window.slither;
+      
+      switch (combatDecision.mode) {
+        case 'EMERGENCY_DEFENSE':
+          return this.executeEmergencyDefense(headPos, headAngle, snakeRadius, combatDecision);
+          
+        case 'AGGRESSIVE_ATTACK':
+          return this.executeAggressiveAttack(headPos, headAngle, snakeRadius, combatDecision);
+          
+        case 'TACTICAL_MANEUVER':
+          return this.executeTacticalManeuver(headPos, headAngle, snakeRadius, combatDecision);
+          
+        case 'PASSIVE':
+        default:
+          // Fall back to regular collision avoidance
+          return this.calculateFullControlAvoidance(headPos, headAngle, snakeRadius);
+      }
+    }
+
+    // Execute emergency defense maneuvers
+    executeEmergencyDefense(headPos, headAngle, snakeRadius, combatDecision) {
+      const target = combatDecision.target;
+      const escapeRoutes = combatDecision.escapeRoutes;
+      
+      // Find the safest escape route
+      const safeRoutes = escapeRoutes.filter(route => route.safety === 'SAFE');
+      
+      if (safeRoutes.length > 0) {
+        // Use the safest route with best time advantage
+        const bestRoute = safeRoutes[0]; // Already sorted by safety and time
+        const escapeDirection = this.calculateArcDirection(bestRoute.arc, headPos);
+        
+        console.log(`🛡️ EMERGENCY DEFENSE: Using ${bestRoute.route} escape`);
+        return escapeDirection;
+      }
+      
+      // No safe routes - use emergency avoidance
+      console.log(`🚨 CRITICAL: No safe escape routes, using emergency avoidance`);
+      return this.calculateFullControlAvoidance(headPos, headAngle, snakeRadius);
+    }
+
+    // Execute aggressive attack maneuvers - MUCH more conservative
+    executeAggressiveAttack(headPos, headAngle, snakeRadius, combatDecision) {
+      const target = combatDecision.target;
+      const attackPoint = combatDecision.attackPoint;
+      
+      if (attackPoint) {
+        // CRITICAL: Re-verify attack is still safe in real-time
+        const currentAnalysis = this.analyzeTrajectoryCollision(target.snake);
+        const currentEnemySpeed = target.snake.sp || 5.78;
+        
+        // Must maintain SIGNIFICANT advantage and enemy must not be boosting
+        const stillSafe = currentAnalysis && 
+                         currentAnalysis.criticalCollision && 
+                         currentAnalysis.criticalCollision.timeDifference < -0.25 && // 250ms minimum advantage
+                         currentEnemySpeed <= 6.0; // Enemy not boosting
+        
+        if (stillSafe) {
+          // Calculate direction to attack point
+          const attackDirection = fastAtan2(attackPoint.y - headPos.y, attackPoint.x - headPos.x);
+          console.log(`⚔️ SAFE ATTACK: ${Math.abs(currentAnalysis.criticalCollision.timeDifference).toFixed(3)}s advantage`);
+          return attackDirection;
+        }
+      }
+      
+      // Attack no longer safe - immediately switch to defense
+      console.log(`🛡️ ATTACK ABORTED: Switching to emergency defense`);
+      return this.calculateFullControlAvoidance(headPos, headAngle, snakeRadius);
+    }
+
+    // Execute tactical maneuvering
+    executeTacticalManeuver(headPos, headAngle, snakeRadius, combatDecision) {
+      const target = combatDecision.target;
+      const escapeRoutes = combatDecision.escapeRoutes;
+      
+      // Look for positioning opportunities
+      const safeRoutes = escapeRoutes.filter(route => route.safety === 'SAFE' || route.safety === 'RISKY');
+      
+      if (safeRoutes.length > 0) {
+        const bestRoute = safeRoutes[0];
+        const tacticalDirection = this.calculateArcDirection(bestRoute.arc, headPos);
+        
+        console.log(`🧠 TACTICAL: Maneuvering with ${bestRoute.route} (${bestRoute.safety})`);
+        return tacticalDirection;
+      }
+      
+      // No good tactical options - use standard avoidance
+      console.log(`🔄 TACTICAL: No good options, using standard avoidance`);
+      return this.calculateFullControlAvoidance(headPos, headAngle, snakeRadius);
+    }
+
+    // Calculate direction towards an arc from current position
+    calculateArcDirection(arc, currentPos) {
+      if (!arc || !arc.points || arc.points.length === 0) {
+        return null;
+      }
+      
+      // Find the closest point on the arc
+      let closestPoint = arc.points[0];
+      let minDistance = getDistance2(currentPos.x, currentPos.y, closestPoint.x, closestPoint.y);
+      
+      for (const point of arc.points) {
+        const dist = getDistance2(currentPos.x, currentPos.y, point.x, point.y);
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestPoint = point;
+        }
+      }
+      
+      // Calculate direction to the closest point on the arc
+      return fastAtan2(closestPoint.y - currentPos.y, closestPoint.x - currentPos.x);
+    }
+
+    // Simple reactive collision detection - no prediction needed
+    detectReactiveCollisions(headPos, headAngle, snakeRadius, snakeSpeed, snakes, borderSize) {
+      const lookAheadVector = {
+        x: Math.cos(headAngle) * this.lookaheadDistance,
+        y: Math.sin(headAngle) * this.lookaheadDistance
+      };
+>>>>>>> origin/main
 
     // Calculate intersection points between two turn arcs
     calculateArcIntersections(arc1, arc2) {
