@@ -250,6 +250,10 @@ The MIT License (MIT)
     lastControlAngle = 0;
     controlActive = false;
 
+    // Combat mode parameters
+    combatModeEnabled = true; // Enable/disable Phase 3 combat decisions
+    lastCombatDecision = null;
+
     // Dynamic parameters (calculated each frame)
     lookaheadDistance = 200;
     dangerZoneRadius = 120;
@@ -281,21 +285,36 @@ The MIT License (MIT)
       // Detect immediate collision dangers (reactive only)
       this.detectReactiveCollisions(headPos, headAngle, snakeRadius, snake.sp, snakes, borderSize);
 
+      // =====================================
+      // Phase 3: Combat Decision Engine
+      // =====================================
+      
+      // Analyze combat opportunities and threats (Phase 3)
+      let combatDecision = { mode: 'PASSIVE', hasOpportunity: false, reason: 'Combat mode disabled' };
+      if (this.combatModeEnabled) {
+        combatDecision = this.evaluateCombatSituation(snake, snakes, headPos, headAngle, snakeRadius);
+      }
+      this.lastCombatDecision = combatDecision; // Store for visualization
+      
       // Debug output
-      if (this.dangerZones.length > 0) {
+      if (this.dangerZones.length > 0 || combatDecision.hasOpportunity) {
         const isBoosting = snake.sp > 6.0;
         console.log(`Enhanced Collision Avoidance: ${this.dangerZones.length} dangers, closest: ${this.dangerZones[0]?.distance?.toFixed(0)}px, boost: ${isBoosting}`);
+        
+        if (combatDecision.hasOpportunity) {
+          console.log(`🎯 COMBAT: ${combatDecision.mode} - ${combatDecision.reason}`);
+        }
       }
 
-      // Calculate avoidance direction for full control mode
-      const avoidanceAngle = this.calculateFullControlAvoidance(headPos, headAngle, snakeRadius);
+      // Calculate direction based on combat decision or avoidance
+      const finalAngle = this.calculateCombatAwareDirection(headPos, headAngle, snakeRadius, combatDecision);
 
       // Apply visual debugging if enabled
       if (this.visualsEnabled) {
         this.drawDebugVisuals(headPos, headAngle, snakeRadius);
       }
 
-      return avoidanceAngle;
+      return finalAngle;
     }
 
     // Calculate turn radius based on snake properties
@@ -601,6 +620,209 @@ The MIT License (MIT)
         allCollisions: collisionAnalysis,
         escapeRoutes: this.validateEscapeRoutes(mySnake, enemySnake, criticalCollision)
       };
+    }
+
+    // =====================================
+    // Phase 3: Combat Decision Engine  
+    // =====================================
+
+    // Evaluate overall combat situation
+    evaluateCombatSituation(mySnake, allSnakes, headPos, headAngle, snakeRadius) {
+      const combatRange = 800; // Analyze enemies within this range
+      const nearbyEnemies = [];
+      
+      // Find nearby enemy snakes
+      for (const snake of allSnakes) {
+        if (!snake || snake.id === mySnake.id) continue;
+        
+        const distance = Math.sqrt(getDistance2(headPos.x, headPos.y, snake.xx, snake.yy));
+        if (distance <= combatRange) {
+          const analysis = this.analyzeTrajectoryCollision(snake);
+          if (analysis) {
+            nearbyEnemies.push({
+              snake: snake,
+              distance: distance,
+              analysis: analysis
+            });
+          }
+        }
+      }
+      
+      if (nearbyEnemies.length === 0) {
+        return { 
+          mode: 'PASSIVE', 
+          hasOpportunity: false, 
+          reason: 'No nearby enemies'
+        };
+      }
+      
+      // Categorize threats and opportunities
+      const highThreats = nearbyEnemies.filter(e => e.analysis.threat === 'HIGH');
+      const attackOpportunities = nearbyEnemies.filter(e => e.analysis.threat === 'LOW' && 
+        e.analysis.recommendation === 'ATTACK_OPPORTUNITY');
+      
+      // Decision priority: Safety first, then opportunities
+      if (highThreats.length > 0) {
+        const closestThreat = highThreats.reduce((min, current) => 
+          current.distance < min.distance ? current : min
+        );
+        
+        return {
+          mode: 'EMERGENCY_DEFENSE',
+          hasOpportunity: true,
+          target: closestThreat,
+          reason: `High threat at ${closestThreat.distance.toFixed(0)}px`,
+          escapeRoutes: closestThreat.analysis.escapeRoutes
+        };
+      }
+      
+      if (attackOpportunities.length > 0) {
+        const bestOpportunity = attackOpportunities.reduce((best, current) => {
+          const bestTime = best.analysis.criticalCollision?.timeDifference || 0;
+          const currentTime = current.analysis.criticalCollision?.timeDifference || 0;
+          return currentTime < bestTime ? current : best; // More advantage = more negative time
+        });
+        
+        return {
+          mode: 'AGGRESSIVE_ATTACK',
+          hasOpportunity: true,
+          target: bestOpportunity,
+          reason: `Attack opportunity with ${Math.abs(bestOpportunity.analysis.criticalCollision?.timeDifference || 0).toFixed(2)}s advantage`,
+          attackPoint: bestOpportunity.analysis.criticalCollision?.intersectionPoint
+        };
+      }
+      
+      // Medium threats - tactical maneuvering
+      const mediumThreats = nearbyEnemies.filter(e => e.analysis.threat === 'MEDIUM');
+      if (mediumThreats.length > 0) {
+        const closestMedium = mediumThreats.reduce((min, current) => 
+          current.distance < min.distance ? current : min
+        );
+        
+        return {
+          mode: 'TACTICAL_MANEUVER',
+          hasOpportunity: true,
+          target: closestMedium,
+          reason: `Tactical situation at ${closestMedium.distance.toFixed(0)}px`,
+          escapeRoutes: closestMedium.analysis.escapeRoutes
+        };
+      }
+      
+      return { 
+        mode: 'PASSIVE', 
+        hasOpportunity: false, 
+        reason: 'No immediate threats or opportunities'
+      };
+    }
+
+    // Calculate direction based on combat decision
+    calculateCombatAwareDirection(headPos, headAngle, snakeRadius, combatDecision) {
+      const mySnake = window.slither;
+      
+      switch (combatDecision.mode) {
+        case 'EMERGENCY_DEFENSE':
+          return this.executeEmergencyDefense(headPos, headAngle, snakeRadius, combatDecision);
+          
+        case 'AGGRESSIVE_ATTACK':
+          return this.executeAggressiveAttack(headPos, headAngle, snakeRadius, combatDecision);
+          
+        case 'TACTICAL_MANEUVER':
+          return this.executeTacticalManeuver(headPos, headAngle, snakeRadius, combatDecision);
+          
+        case 'PASSIVE':
+        default:
+          // Fall back to regular collision avoidance
+          return this.calculateFullControlAvoidance(headPos, headAngle, snakeRadius);
+      }
+    }
+
+    // Execute emergency defense maneuvers
+    executeEmergencyDefense(headPos, headAngle, snakeRadius, combatDecision) {
+      const target = combatDecision.target;
+      const escapeRoutes = combatDecision.escapeRoutes;
+      
+      // Find the safest escape route
+      const safeRoutes = escapeRoutes.filter(route => route.safety === 'SAFE');
+      
+      if (safeRoutes.length > 0) {
+        // Use the safest route with best time advantage
+        const bestRoute = safeRoutes[0]; // Already sorted by safety and time
+        const escapeDirection = this.calculateArcDirection(bestRoute.arc, headPos);
+        
+        console.log(`🛡️ EMERGENCY DEFENSE: Using ${bestRoute.route} escape`);
+        return escapeDirection;
+      }
+      
+      // No safe routes - use emergency avoidance
+      console.log(`🚨 CRITICAL: No safe escape routes, using emergency avoidance`);
+      return this.calculateFullControlAvoidance(headPos, headAngle, snakeRadius);
+    }
+
+    // Execute aggressive attack maneuvers  
+    executeAggressiveAttack(headPos, headAngle, snakeRadius, combatDecision) {
+      const target = combatDecision.target;
+      const attackPoint = combatDecision.attackPoint;
+      
+      if (attackPoint) {
+        // Calculate direction to attack point
+        const attackDirection = fastAtan2(attackPoint.y - headPos.y, attackPoint.x - headPos.x);
+        
+        // Verify we still have time advantage
+        const currentAnalysis = this.analyzeTrajectoryCollision(target.snake);
+        if (currentAnalysis && currentAnalysis.criticalCollision && 
+            currentAnalysis.criticalCollision.timeDifference < -0.05) {
+          
+          console.log(`⚔️ ATTACK: Intercepting at collision point`);
+          return attackDirection;
+        }
+      }
+      
+      // Attack opportunity lost or invalid - revert to defense
+      console.log(`⚠️ ATTACK ABORTED: Conditions changed, reverting to defense`);
+      return this.calculateFullControlAvoidance(headPos, headAngle, snakeRadius);
+    }
+
+    // Execute tactical maneuvering
+    executeTacticalManeuver(headPos, headAngle, snakeRadius, combatDecision) {
+      const target = combatDecision.target;
+      const escapeRoutes = combatDecision.escapeRoutes;
+      
+      // Look for positioning opportunities
+      const safeRoutes = escapeRoutes.filter(route => route.safety === 'SAFE' || route.safety === 'RISKY');
+      
+      if (safeRoutes.length > 0) {
+        const bestRoute = safeRoutes[0];
+        const tacticalDirection = this.calculateArcDirection(bestRoute.arc, headPos);
+        
+        console.log(`🧠 TACTICAL: Maneuvering with ${bestRoute.route} (${bestRoute.safety})`);
+        return tacticalDirection;
+      }
+      
+      // No good tactical options - use standard avoidance
+      console.log(`🔄 TACTICAL: No good options, using standard avoidance`);
+      return this.calculateFullControlAvoidance(headPos, headAngle, snakeRadius);
+    }
+
+    // Calculate direction towards an arc from current position
+    calculateArcDirection(arc, currentPos) {
+      if (!arc || !arc.points || arc.points.length === 0) {
+        return null;
+      }
+      
+      // Find the closest point on the arc
+      let closestPoint = arc.points[0];
+      let minDistance = getDistance2(currentPos.x, currentPos.y, closestPoint.x, closestPoint.y);
+      
+      for (const point of arc.points) {
+        const dist = getDistance2(currentPos.x, currentPos.y, point.x, point.y);
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestPoint = point;
+        }
+      }
+      
+      // Calculate direction to the closest point on the arc
+      return fastAtan2(closestPoint.y - currentPos.y, closestPoint.x - currentPos.x);
     }
 
     // Simple reactive collision detection - no prediction needed
@@ -1161,6 +1383,44 @@ The MIT License (MIT)
           }
         }
       }
+
+      // Phase 3: Draw combat mode indicators
+      const combatDecision = this.lastCombatDecision;
+      if (combatDecision && combatDecision.hasOpportunity) {
+        let modeColor, modeText;
+        
+        switch (combatDecision.mode) {
+          case 'EMERGENCY_DEFENSE':
+            modeColor = "red";
+            modeText = "🛡️ DEFENSE";
+            break;
+          case 'AGGRESSIVE_ATTACK':
+            modeColor = "lime";
+            modeText = "⚔️ ATTACK";
+            // Draw attack target line
+            if (combatDecision.attackPoint) {
+              this.visualizer.drawLine(
+                { x: mySnake.xx, y: mySnake.yy },
+                combatDecision.attackPoint,
+                "lime", 4
+              );
+            }
+            break;
+          case 'TACTICAL_MANEUVER':
+            modeColor = "yellow";
+            modeText = "🧠 TACTICAL";
+            break;
+        }
+        
+        // Draw mode indicator near snake head
+        this.visualizer.drawCircle(
+          { x: mySnake.xx + 50, y: mySnake.yy - 50, r: 15 },
+          modeColor, true, 0.8
+        );
+        
+        console.log(`Combat Mode: ${modeText} - ${combatDecision.reason}`);
+      }
+
       // Draw turn radius info text
       const turnRadius = this.calculateTurnRadius(mySnake);
       const isBoosting = mySnake.sp > this.boostSpeedThreshold;
@@ -2690,6 +2950,10 @@ The MIT License (MIT)
     e: () => {
       enhancedCollisionState.val = !enhancedCollisionState.val;
       collisionAvoidance.enabled = enhancedCollisionState.val;
+    },
+    c: () => {
+      collisionAvoidance.combatModeEnabled = !collisionAvoidance.combatModeEnabled;
+      console.log(`🎯 Combat Mode: ${collisionAvoidance.combatModeEnabled ? 'ENABLED' : 'DISABLED'}`);
     }
   };
   var initEventListeners = () => {
