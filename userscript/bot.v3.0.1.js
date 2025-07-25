@@ -3313,30 +3313,33 @@ The MIT License (MIT)
       zoom.set(window.gsc);
     }
   };
-  var findGameScript = async () => {
-    const abortController = new AbortController();
-    setTimeout(() => abortController.abort(), 5e3);
-    return new Promise((resolve, reject) => {
-      if (document.querySelector("script[src*='game']")) {
-        resolve();
-        return;
-      }
-      const observer = new MutationObserver(() => {
-        const script = document.querySelector("script[src*='game']");
-        if (script && script instanceof HTMLScriptElement) {
-          observer.disconnect();
-          script.addEventListener("load", () => resolve(), { once: true });
+  var waitForGame = async () => {
+    console.log('🔍 Waiting for game to load...');
+    
+    return new Promise((resolve) => {
+      const checkGame = () => {
+        console.log('🔍 Checking game state:', {
+          oef: typeof window.oef,
+          connect: typeof window.connect,
+          slither: typeof window.slither,
+          playing: typeof window.playing
+        });
+        
+        // Check if core game functions exist
+        if (typeof window.oef === 'function' && 
+            typeof window.connect === 'function' && 
+            typeof window.playing !== 'undefined') {
+          console.log('✅ Game ready!');
+          resolve();
+          return;
         }
-      });
-      observer.observe(document.documentElement, {
-        childList: true,
-        subtree: true
-      });
-      abortController.signal.addEventListener("abort", () => {
-        observer.disconnect();
-        reject(new Error("Game script not found"));
-      });
+        
+        // Keep checking every 100ms
+        setTimeout(checkGame, 100);
+      };
+      
+      checkGame();
     });
   };
-  Promise.all([ready(), findGameScript()]).then(() => init()).catch(console.error);
+  Promise.all([ready(), waitForGame()]).then(() => init()).catch(console.error);
 })();
