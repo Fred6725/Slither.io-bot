@@ -879,12 +879,12 @@ The MIT License (MIT)
       return fastAtan2(closestPoint.y - currentPos.y, closestPoint.x - currentPos.x);
     }
 
-    // Simple reactive collision detection - no prediction needed
+    // Simple reactive collision detection - no prediction needed (placeholder)
     detectReactiveCollisions(headPos, headAngle, snakeRadius, snakeSpeed, snakes, borderSize) {
-      const lookAheadVector = {
-        x: Math.cos(headAngle) * this.lookaheadDistance,
-        y: Math.sin(headAngle) * this.lookaheadDistance
-      };
+      // Collision logic removed - structure preserved for future development
+      return null;
+    }
+
     // Calculate intersection points between two turn arcs
     calculateArcIntersections(arc1, arc2) {
       const intersections = [];
