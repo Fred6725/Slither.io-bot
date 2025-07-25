@@ -365,7 +365,241 @@ The MIT License (MIT)
       return {
         points: arcPoints,
         center: { x: turnCenterX, y: turnCenterY },
-        radius: turnRadius
+        radius: turnRadius,
+        direction: direction,
+        startAngle: currentAngle,
+        snake: snake
+      };
+    }
+
+    // =====================================
+    // Phase 2: Trajectory Collision Math
+    // =====================================
+
+    // Calculate intersection points between two turn arcs
+    calculateArcIntersections(arc1, arc2) {
+      const intersections = [];
+      
+      // Get circle centers and radii
+      const c1 = arc1.center;
+      const c2 = arc2.center;
+      const r1 = arc1.radius;
+      const r2 = arc2.radius;
+      
+      // Distance between centers
+      const d = Math.sqrt(getDistance2(c1.x, c1.y, c2.x, c2.y));
+      
+      // Check if circles intersect
+      if (d > r1 + r2 || d < Math.abs(r1 - r2) || d === 0) {
+        return []; // No intersection or infinite intersections
+      }
+      
+      // Calculate intersection points using circle-circle intersection formula
+      const a = (r1 * r1 - r2 * r2 + d * d) / (2 * d);
+      const h = Math.sqrt(r1 * r1 - a * a);
+      
+      // Point on line between centers
+      const px = c1.x + a * (c2.x - c1.x) / d;
+      const py = c1.y + a * (c2.y - c1.y) / d;
+      
+      // Calculate both intersection points
+      const intersection1 = {
+        x: px + h * (c2.y - c1.y) / d,
+        y: py - h * (c2.x - c1.x) / d
+      };
+      
+      const intersection2 = {
+        x: px - h * (c2.y - c1.y) / d,
+        y: py + h * (c2.x - c1.x) / d
+      };
+      
+      // Check if intersections are within the arc ranges
+      if (this.isPointOnArc(intersection1, arc1) && this.isPointOnArc(intersection1, arc2)) {
+        intersections.push(intersection1);
+      }
+      
+      if (this.isPointOnArc(intersection2, arc1) && this.isPointOnArc(intersection2, arc2)) {
+        intersections.push(intersection2);
+      }
+      
+      return intersections;
+    }
+
+    // Check if a point lies on a specific arc (not just the full circle)
+    isPointOnArc(point, arc) {
+      const center = arc.center;
+      const angleToPoint = fastAtan2(point.y - center.y, point.x - center.x);
+      
+      // Calculate the arc's angle range
+      const startAngle = arc.startAngle + arc.direction * Math.PI / 2 + Math.PI;
+      const endAngle = startAngle + arc.direction * this.arcLength;
+      
+      // Normalize angles to [0, 2π]
+      const normalizedAngleToPoint = ((angleToPoint % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      const normalizedStartAngle = ((startAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      const normalizedEndAngle = ((endAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      
+      // Check if point angle is within arc range
+      if (normalizedStartAngle <= normalizedEndAngle) {
+        return normalizedAngleToPoint >= normalizedStartAngle && normalizedAngleToPoint <= normalizedEndAngle;
+      } else {
+        // Arc crosses 0° boundary
+        return normalizedAngleToPoint >= normalizedStartAngle || normalizedAngleToPoint <= normalizedEndAngle;
+      }
+    }
+
+    // Calculate time to reach a point on an arc
+    calculateTimeToPoint(arc, point) {
+      const center = arc.center;
+      const snake = arc.snake;
+      const currentSpeed = snake.sp || 5.78;
+      
+      // Calculate angle from current position to target point
+      const currentAngle = fastAtan2(snake.yy - center.y, snake.xx - center.x);
+      const targetAngle = fastAtan2(point.y - center.y, point.x - center.x);
+      
+      // Calculate angular distance (considering direction)
+      let angularDistance = this.angleDifference(targetAngle, currentAngle);
+      if (arc.direction < 0) angularDistance = -angularDistance;
+      angularDistance = Math.abs(angularDistance);
+      
+      // Convert angular distance to arc length
+      const arcDistance = angularDistance * arc.radius;
+      
+      // Time = distance / speed
+      return arcDistance / currentSpeed;
+    }
+
+    // Determine winner in a collision scenario
+    determineCollisionWinner(myArc, enemyArc, intersectionPoint) {
+      const myTimeToCollision = this.calculateTimeToPoint(myArc, intersectionPoint);
+      const enemyTimeToCollision = this.calculateTimeToPoint(enemyArc, intersectionPoint);
+      
+      const timeDifference = myTimeToCollision - enemyTimeToCollision;
+      const SAFETY_MARGIN = 0.1; // 100ms safety margin
+      
+      return {
+        myTime: myTimeToCollision,
+        enemyTime: enemyTimeToCollision,
+        timeDifference: timeDifference,
+        isSafe: timeDifference < -SAFETY_MARGIN, // We arrive significantly earlier
+        isWinning: timeDifference < 0, // We arrive first
+        isDangerous: timeDifference > SAFETY_MARGIN, // They arrive significantly earlier
+        intersectionPoint: intersectionPoint
+      };
+    }
+
+    // Validate if escape routes are available
+    validateEscapeRoutes(mySnake, enemySnake, dangerScenario) {
+      const escapeRoutes = [];
+      
+      // Calculate alternative arcs (different turn directions)
+      const myLeftArc = this.calculateTurnArc(mySnake, -1);
+      const myRightArc = this.calculateTurnArc(mySnake, 1);
+      const enemyLeftArc = this.calculateTurnArc(enemySnake, -1);
+      const enemyRightArc = this.calculateTurnArc(enemySnake, 1);
+      
+      // Test all combinations
+      const arcCombinations = [
+        { my: myLeftArc, enemy: enemyLeftArc, name: 'My Left vs Enemy Left' },
+        { my: myLeftArc, enemy: enemyRightArc, name: 'My Left vs Enemy Right' },
+        { my: myRightArc, enemy: enemyLeftArc, name: 'My Right vs Enemy Left' },
+        { my: myRightArc, enemy: enemyRightArc, name: 'My Right vs Enemy Right' }
+      ];
+      
+      for (const combo of arcCombinations) {
+        const intersections = this.calculateArcIntersections(combo.my, combo.enemy);
+        
+        if (intersections.length === 0) {
+          // No collision - safe route
+          escapeRoutes.push({
+            route: combo.name,
+            arc: combo.my,
+            safety: 'SAFE',
+            reason: 'No trajectory intersection'
+          });
+        } else {
+          // Check timing for each intersection
+          for (const intersection of intersections) {
+            const result = this.determineCollisionWinner(combo.my, combo.enemy, intersection);
+            
+            escapeRoutes.push({
+              route: combo.name,
+              arc: combo.my,
+              safety: result.isSafe ? 'SAFE' : result.isDangerous ? 'DANGEROUS' : 'RISKY',
+              timeDifference: result.timeDifference,
+              intersection: intersection,
+              details: result
+            });
+          }
+        }
+      }
+      
+      // Sort by safety (safest first)
+      escapeRoutes.sort((a, b) => {
+        const safetyOrder = { 'SAFE': 0, 'RISKY': 1, 'DANGEROUS': 2 };
+        const safetyCmp = safetyOrder[a.safety] - safetyOrder[b.safety];
+        if (safetyCmp !== 0) return safetyCmp;
+        
+        // If same safety level, prefer larger time advantage
+        return (a.timeDifference || 0) - (b.timeDifference || 0);
+      });
+      
+      return escapeRoutes;
+    }
+
+    // Main trajectory analysis for combat decisions
+    analyzeTrajectoryCollision(enemySnake) {
+      const mySnake = window.slither;
+      if (!mySnake || !enemySnake) return null;
+      
+      // Calculate current trajectory arcs
+      const myCurrentArc = this.calculateTurnArc(mySnake, mySnake.ang > 0 ? 1 : -1);
+      const enemyCurrentArc = this.calculateTurnArc(enemySnake, enemySnake.ang > 0 ? 1 : -1);
+      
+      // Find intersections
+      const intersections = this.calculateArcIntersections(myCurrentArc, enemyCurrentArc);
+      
+      if (intersections.length === 0) {
+        // No immediate collision threat on current trajectories
+        return {
+          threat: 'NONE',
+          recommendation: 'MAINTAIN_COURSE',
+          escapeRoutes: this.validateEscapeRoutes(mySnake, enemySnake, null)
+        };
+      }
+      
+      // Analyze each intersection point
+      const collisionAnalysis = [];
+      for (const intersection of intersections) {
+        const result = this.determineCollisionWinner(myCurrentArc, enemyCurrentArc, intersection);
+        collisionAnalysis.push(result);
+      }
+      
+      // Get the most critical collision (shortest time)
+      const criticalCollision = collisionAnalysis.reduce((min, current) => 
+        Math.min(min.myTime, min.enemyTime) < Math.min(current.myTime, current.enemyTime) ? min : current
+      );
+      
+      // Determine overall threat level and recommendation
+      let threat, recommendation;
+      if (criticalCollision.isSafe) {
+        threat = 'LOW';
+        recommendation = 'ATTACK_OPPORTUNITY';
+      } else if (criticalCollision.isDangerous) {
+        threat = 'HIGH';
+        recommendation = 'EMERGENCY_ESCAPE';
+      } else {
+        threat = 'MEDIUM';
+        recommendation = 'TACTICAL_MANEUVER';
+      }
+      
+      return {
+        threat: threat,
+        recommendation: recommendation,
+        criticalCollision: criticalCollision,
+        allCollisions: collisionAnalysis,
+        escapeRoutes: this.validateEscapeRoutes(mySnake, enemySnake, criticalCollision)
       };
     }
 
@@ -872,6 +1106,61 @@ The MIT License (MIT)
         { x: myRightArc.center.x, y: myRightArc.center.y, r: 5 },
         "green", true, 0.7
       );
+
+      // Phase 2: Draw trajectory collision analysis for nearby enemies
+      for (const snake of window.slithers) {
+        if (!snake || snake.id === mySnake.id) continue;
+        
+        const distance = Math.sqrt(getDistance2(mySnake.xx, mySnake.yy, snake.xx, snake.yy));
+        if (distance > 600) continue; // Only analyze nearby snakes
+        
+        // Analyze trajectory collision
+        const analysis = this.analyzeTrajectoryCollision(snake);
+        if (!analysis) continue;
+        
+        // Draw intersection points based on threat level
+        if (analysis.criticalCollision && analysis.criticalCollision.intersectionPoint) {
+          const point = analysis.criticalCollision.intersectionPoint;
+          let color, size;
+          
+          switch (analysis.threat) {
+            case 'HIGH':
+              color = "red";
+              size = 12;
+              break;
+            case 'MEDIUM':
+              color = "yellow";
+              size = 10;
+              break;
+            case 'LOW':
+              color = "lime";
+              size = 8;
+              break;
+            default:
+              color = "white";
+              size = 6;
+          }
+          
+          // Draw collision point
+          this.visualizer.drawCircle(
+            { x: point.x, y: point.y, r: size },
+            color, true, 0.8
+          );
+          
+          // Draw timing info
+          const timeDiff = analysis.criticalCollision.timeDifference;
+          console.log(`Trajectory Analysis: ${analysis.threat} threat, Time diff: ${timeDiff.toFixed(2)}s, Recommendation: ${analysis.recommendation}`);
+        }
+        
+        // Draw escape routes (best route only)
+        if (analysis.escapeRoutes && analysis.escapeRoutes.length > 0) {
+          const bestRoute = analysis.escapeRoutes[0];
+          if (bestRoute.safety === 'SAFE' && bestRoute.arc) {
+            // Draw escape route in bright cyan
+            this.drawArcPoints(bestRoute.arc.points, "cyan", 3, 0.6);
+          }
+        }
+      }
 
       // Draw turn radius info text
       const turnRadius = this.calculateTurnRadius(mySnake);
