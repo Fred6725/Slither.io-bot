@@ -381,8 +381,6 @@ The MIT License (MIT)
     // =====================================
     // Phase 2: Trajectory Collision Math
     // =====================================
-<<<<<<< HEAD
-=======
 
     // Calculate intersection points between two turn arcs
     calculateArcIntersections(arc1, arc2) {
@@ -887,8 +885,6 @@ The MIT License (MIT)
         x: Math.cos(headAngle) * this.lookaheadDistance,
         y: Math.sin(headAngle) * this.lookaheadDistance
       };
->>>>>>> origin/main
-
     // Calculate intersection points between two turn arcs
     calculateArcIntersections(arc1, arc2) {
       const intersections = [];
