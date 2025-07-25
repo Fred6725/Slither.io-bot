@@ -306,6 +306,11 @@ The MIT License (MIT)
         }
       }
 
+      // Debug combat mode status (remove this after testing)
+      if (Math.random() < 0.01) { // Log occasionally to verify combat mode is working
+        console.log(`🔧 DEBUG: Combat Mode ${this.combatModeEnabled ? 'ENABLED' : 'DISABLED'}, Decision: ${combatDecision.mode}`);
+      }
+
       // Calculate direction based on combat decision or avoidance
       const finalAngle = this.calculateCombatAwareDirection(headPos, headAngle, snakeRadius, combatDecision);
 
@@ -1386,6 +1391,16 @@ The MIT License (MIT)
 
       // Phase 3: Draw combat mode indicators
       const combatDecision = this.lastCombatDecision;
+      
+      // Always show combat mode status when enabled
+      if (this.combatModeEnabled) {
+        // Draw combat mode indicator (small blue circle when active)
+        this.visualizer.drawCircle(
+          { x: mySnake.xx - 50, y: mySnake.yy - 50, r: 8 },
+          "blue", true, 0.6
+        );
+      }
+      
       if (combatDecision && combatDecision.hasOpportunity) {
         let modeColor, modeText;
         
@@ -2703,6 +2718,7 @@ The MIT License (MIT)
   var collisionAvoidanceState = state2(false);
   var collisionVisualsState = state2(false);
   var enhancedCollisionState = state2(false);
+  var combatModeState = state2(true);
   var fpsState = state2(0);
   var pingState = state2("0ms");
   var serverState = state2("[0:0:0:0:0:0:0:0]:444");
@@ -2808,6 +2824,13 @@ The MIT License (MIT)
         span(
           { class: getToggleClass(enhancedCollisionState) },
           getToggleValue(enhancedCollisionState)
+        )
+      ]),
+      div({ class: "pref-overlay__item" }, [
+        span({ class: "pref-overlay__label" }, "[C] Combat Mode: "),
+        span(
+          { class: getToggleClass(combatModeState) },
+          getToggleValue(combatModeState)
         )
       ]),
       div({ class: "pref-overlay__item" }, [
@@ -2953,6 +2976,7 @@ The MIT License (MIT)
     },
     c: () => {
       collisionAvoidance.combatModeEnabled = !collisionAvoidance.combatModeEnabled;
+      combatModeState.val = collisionAvoidance.combatModeEnabled;
       console.log(`🎯 Combat Mode: ${collisionAvoidance.combatModeEnabled ? 'ENABLED' : 'DISABLED'}`);
     }
   };
