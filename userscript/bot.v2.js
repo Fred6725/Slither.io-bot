@@ -233,6 +233,15 @@ The MIT License (MIT)
     boostTurnPenalty = 2.0;  // Conservative for worst-case
     massMultiplier = 0.3;
     
+    // Trajectory projection parameters
+    projectionTime = 1.0; // 1 second ahead - adjustable constant
+    boostAccelerationTime = 0.4; // Time to reach max boost (0.3-0.6s range)
+    maxBoostSpeed = 13.5; // Maximum possible speed
+    baseSpeed = 5.78; // Normal speed
+    
+    // Last-moment intervention timing
+    interventionThreshold = 0.3; // Take control 0.3s before collision
+    
     // Control system
     controlActive = false;
     lastControlAngle = 0;
@@ -345,18 +354,25 @@ The MIT License (MIT)
       return false;
     }
 
-    // Check if we need emergency correction (imminent death)
+    // Check if we need emergency correction (last-moment intervention)
     needsEmergencyCorrection(headPos, headAngle, snakeRadius) {
-      // Find the closest danger
       if (this.dangerZones.length === 0) return false;
 
-      const criticalDanger = this.dangerZones.find(d => 
-        d.distance < snakeRadius + 60  // Very close to collision
-      );
-
-      if (criticalDanger) {
-        console.log(`🚨 EMERGENCY: ${criticalDanger.type} at ${criticalDanger.distance.toFixed(0)}px`);
-        return true;
+      // Check for trajectory-based collision timing
+      for (const danger of this.dangerZones) {
+        if (danger.timeToCollision !== undefined) {
+          // Use time-based intervention (last moment but safe)
+          if (danger.timeToCollision <= this.interventionThreshold) {
+            console.log(`🚨 EMERGENCY: ${danger.type} collision in ${(danger.timeToCollision * 1000).toFixed(0)}ms`);
+            return true;
+          }
+        } else {
+          // Fallback to distance-based for borders
+          if (danger.distance < snakeRadius + 40) {
+            console.log(`🚨 EMERGENCY: ${danger.type} at ${danger.distance.toFixed(0)}px`);
+            return true;
+          }
+        }
       }
 
       return false;
@@ -488,74 +504,142 @@ The MIT License (MIT)
       this.checkBorderCollision(headPos, snakeRadius, borderSize);
     }
 
-    // Check collision with a snake using worst-case turn radius
+    // Check collision using maximum turn trajectory projection
     checkSnakeCollision(headPos, snakeRadius, mySpeed, targetSnake) {
       const targetRadius = this.getSnakeWidth(targetSnake.sc) / 2;
       const targetSpeed = targetSnake.sp || 5.78;
       
-      // Calculate worst-case safety distance
-      const myTurnRadius = this.calculateWorstCaseTurnRadius(window.slither);
-      const enemyTurnRadius = this.calculateWorstCaseTurnRadius(targetSnake);
+      // Calculate my maximum turn trajectory (worst-case scenario)
+      const myMaxTurnTrajectory = this.calculateMaxTurnTrajectory(window.slither);
       
-      // Worst-case scenario: both snakes could turn toward each other
-      const worstCaseSafetyDistance = snakeRadius + targetRadius + 
-        Math.max(myTurnRadius, enemyTurnRadius) * 0.3 + // Turn radius factor
-        (mySpeed + targetSpeed) * 15; // Speed factor
+      // CRITICAL FIX: Head center to snake edge collision
+      // My head center must not touch their edge = myRadius + theirRadius
+      const centerToEdgeDistance = snakeRadius + targetRadius;
 
-      // Check head collision
-      const headDistance = Math.sqrt(
-        (headPos.x - targetSnake.xx) ** 2 + 
-        (headPos.y - targetSnake.yy) ** 2
+      // Check head collision with trajectory projection
+      const headCollision = this.checkTrajectoryCollision(
+        myMaxTurnTrajectory, 
+        { x: targetSnake.xx, y: targetSnake.yy }, 
+        targetRadius,
+        centerToEdgeDistance
       );
 
-      if (headDistance < worstCaseSafetyDistance) {
+      if (headCollision) {
         this.dangerZones.push({
           point: { x: targetSnake.xx, y: targetSnake.yy },
-          distance: headDistance,
-          radius: worstCaseSafetyDistance,
+          distance: headCollision.distance,
+          radius: centerToEdgeDistance,
+          timeToCollision: headCollision.timeToCollision,
           type: 'snake_head',
           snakeId: targetSnake.id,
-          isBoosting: targetSpeed > this.boostSpeedThreshold
+          isBoosting: targetSpeed > this.boostSpeedThreshold,
+          collisionPoint: headCollision.collisionPoint
         });
       }
 
-      // Check body collision
+      // Check body collision with trajectory projection
       if (targetSnake.pts) {
         for (let i = 0; i < targetSnake.pts.length; i++) {
           const bodyPart = targetSnake.pts[i];
           if (!bodyPart || bodyPart.dying) continue;
 
-          const bodyDistance = Math.sqrt(
-            (headPos.x - bodyPart.xx) ** 2 + 
-            (headPos.y - bodyPart.yy) ** 2
+          const bodyCollision = this.checkTrajectoryCollision(
+            myMaxTurnTrajectory,
+            { x: bodyPart.xx, y: bodyPart.yy },
+            targetRadius,
+            centerToEdgeDistance
           );
 
-          const bodySafetyDistance = snakeRadius + targetRadius + myTurnRadius * 0.2;
-
-          if (bodyDistance < bodySafetyDistance) {
+          if (bodyCollision) {
             this.dangerZones.push({
               point: { x: bodyPart.xx, y: bodyPart.yy },
-              distance: bodyDistance,
-              radius: bodySafetyDistance,
+              distance: bodyCollision.distance,
+              radius: centerToEdgeDistance,
+              timeToCollision: bodyCollision.timeToCollision,
               type: 'snake_body',
-              bodyIndex: i
+              bodyIndex: i,
+              collisionPoint: bodyCollision.collisionPoint
             });
           }
         }
       }
     }
 
-    // Calculate worst-case turn radius (maximum possible)
-    calculateWorstCaseTurnRadius(snake) {
-      if (!snake) return this.turnRadiusBase;
+    // Calculate maximum turn trajectory (worst-case scenario)
+    calculateMaxTurnTrajectory(snake) {
+      if (!snake) return [];
 
+      const currentSpeed = snake.sp || this.baseSpeed;
+      const headPos = { x: snake.xx, y: snake.yy };
+      const headAngle = snake.ang;
+      
+      // Model speed progression including boost acceleration
+      const speedProgression = this.calculateSpeedProgression(currentSpeed);
+      
+      // Calculate maximum turn radius at each point in time
+      const trajectoryPoints = [];
+      const timeSteps = 50; // 50 steps over projection time
+      const dt = this.projectionTime / timeSteps;
+      
+      let currentPos = { ...headPos };
+      let currentAngle = headAngle;
+      
+      for (let step = 0; step < timeSteps; step++) {
+        const t = step * dt;
+        const speedAtTime = speedProgression(t);
+        const maxTurnRadius = this.calculateTurnRadiusAtSpeed(snake, speedAtTime);
+        
+        // Maximum turn rate (worst case - hardest possible turn)
+        const maxTurnRate = speedAtTime / maxTurnRadius;
+        
+        // Calculate position if turning at maximum rate
+        const deltaAngle = maxTurnRate * dt;
+        currentAngle += deltaAngle; // Assume maximum left turn (worst case)
+        
+        const velocity = {
+          x: Math.cos(currentAngle) * speedAtTime,
+          y: Math.sin(currentAngle) * speedAtTime
+        };
+        
+        currentPos.x += velocity.x * dt * 60; // Convert to pixels (60 fps)
+        currentPos.y += velocity.y * dt * 60;
+        
+        trajectoryPoints.push({
+          x: currentPos.x,
+          y: currentPos.y,
+          time: t,
+          speed: speedAtTime,
+          turnRadius: maxTurnRadius
+        });
+      }
+      
+      return trajectoryPoints;
+    }
+
+    // Calculate speed progression over time (including boost acceleration)
+    calculateSpeedProgression(currentSpeed) {
+      return (t) => {
+        if (currentSpeed <= this.baseSpeed) {
+          // Not boosting - could start boosting
+          const accelerationTime = Math.min(t, this.boostAccelerationTime);
+          const accelerationProgress = accelerationTime / this.boostAccelerationTime;
+          return this.baseSpeed + (this.maxBoostSpeed - this.baseSpeed) * accelerationProgress;
+        } else {
+          // Already boosting - could go to max speed
+          const remainingAcceleration = this.maxBoostSpeed - currentSpeed;
+          const timeToMax = this.boostAccelerationTime * (remainingAcceleration / (this.maxBoostSpeed - this.baseSpeed));
+          const accelerationTime = Math.min(t, timeToMax);
+          const accelerationProgress = timeToMax > 0 ? accelerationTime / timeToMax : 1;
+          return currentSpeed + remainingAcceleration * accelerationProgress;
+        }
+      };
+    }
+
+    // Calculate turn radius at specific speed
+    calculateTurnRadiusAtSpeed(snake, speed) {
       const length = this.getSnakeLength(snake);
-      const speed = snake.sp || 5.78;
       const mass = snake.sc || 1.0;
-
-      // Assume worst case: high speed + boost
-      const worstCaseSpeed = Math.max(speed, 12.0); // Max possible speed
-      const isBoosting = true; // Assume boosting for worst case
+      const isBoosting = speed > this.boostSpeedThreshold;
 
       let turnRadius = this.turnRadiusBase;
 
@@ -563,18 +647,40 @@ The MIT License (MIT)
       const lengthFactor = 1 + (length / 1000) * this.lengthMultiplier;
       turnRadius *= lengthFactor;
 
-      // Speed factor (worst case)
-      const speedFactor = 1 + ((worstCaseSpeed - 5.78) / 5.78) * this.speedMultiplier;
+      // Speed factor
+      const speedFactor = 1 + ((speed - this.baseSpeed) / this.baseSpeed) * this.speedMultiplier;
       turnRadius *= speedFactor;
 
-      // Boost penalty (assume boosting)
-      turnRadius *= this.boostTurnPenalty;
+      // Boost penalty
+      if (isBoosting) {
+        turnRadius *= this.boostTurnPenalty;
+      }
 
       // Mass factor
       const massFactor = 1 + (mass - 1) * this.massMultiplier;
       turnRadius *= massFactor;
 
       return Math.max(50, turnRadius);
+    }
+
+    // Check if trajectory collides with obstacle
+    checkTrajectoryCollision(trajectory, obstaclePos, obstacleRadius, safeDistance) {
+      for (const point of trajectory) {
+        const distance = Math.sqrt(
+          (point.x - obstaclePos.x) ** 2 + 
+          (point.y - obstaclePos.y) ** 2
+        );
+        
+        if (distance < safeDistance) {
+          return {
+            distance: distance,
+            timeToCollision: point.time,
+            collisionPoint: { x: point.x, y: point.y },
+            trajectoryPoint: point
+          };
+        }
+      }
+      return null;
     }
 
     // Get snake length (reuse from bot)
@@ -636,6 +742,12 @@ The MIT License (MIT)
     drawDebugVisuals(headPos, headAngle, snakeRadius) {
       if (!this.visualsEnabled) return;
 
+      // Draw my maximum turn trajectory
+      if (window.slither) {
+        const myTrajectory = this.calculateMaxTurnTrajectory(window.slither);
+        this.drawTrajectoryArc(myTrajectory, "cyan", 2);
+      }
+
       // Draw user intent direction
       if (Date.now() - this.lastUserInput < 1000) {
         const intentPoint = {
@@ -645,7 +757,7 @@ The MIT License (MIT)
         this.visualizer.drawLine(headPos, intentPoint, "yellow", 3);
       }
 
-      // Draw danger zones
+      // Draw danger zones with collision points
       for (const danger of this.dangerZones) {
         let color;
         switch (danger.type) {
@@ -655,10 +767,24 @@ The MIT License (MIT)
           default: color = "white";
         }
 
+        // Draw danger circle
         this.visualizer.drawCircle(
           { x: danger.point.x, y: danger.point.y, r: danger.radius },
           color, false, 0.6
         );
+
+        // Draw collision point if available
+        if (danger.collisionPoint) {
+          this.visualizer.drawCircle(
+            { x: danger.collisionPoint.x, y: danger.collisionPoint.y, r: 5 },
+            color, true, 0.9
+          );
+          
+          // Draw time to collision
+          if (danger.timeToCollision !== undefined) {
+            console.log(`⏱️ ${danger.type}: ${(danger.timeToCollision * 1000).toFixed(0)}ms to collision`);
+          }
+        }
       }
 
       // Draw control status
@@ -672,6 +798,34 @@ The MIT License (MIT)
         );
         
         console.log(`🛡️ REACTIVE DEFENSE: ${statusText}`);
+      }
+    }
+
+    // Draw trajectory arc visualization
+    drawTrajectoryArc(trajectory, color, width) {
+      if (trajectory.length < 2) return;
+      
+      // Draw the trajectory as connected line segments
+      for (let i = 0; i < trajectory.length - 1; i++) {
+        this.visualizer.drawLine(
+          trajectory[i], 
+          trajectory[i + 1], 
+          color, 
+          width
+        );
+      }
+      
+      // Draw speed/time markers along the trajectory
+      const markerInterval = Math.floor(trajectory.length / 10);
+      for (let i = 0; i < trajectory.length; i += markerInterval) {
+        const point = trajectory[i];
+        const speedRatio = (point.speed - this.baseSpeed) / (this.maxBoostSpeed - this.baseSpeed);
+        const markerColor = speedRatio > 0.5 ? "red" : "yellow";
+        
+        this.visualizer.drawCircle(
+          { x: point.x, y: point.y, r: 3 },
+          markerColor, true, 0.7
+        );
       }
     }
 
