@@ -658,7 +658,7 @@ The MIT License (MIT)
       const enemyHeadingDiff = Math.abs(this.angleDifference(enemyHeadAngle, angleFromEnemy));
       
       // Only engage in head-to-head combat scenarios
-      const isHeadToHead = myHeadingDiff < Math.PI / 3 && enemyHeadingDiff < Math.PI / 3; // Both within 60°
+      const isHeadToHead = myHeadingDiff < Math.PI / 2 && enemyHeadingDiff < Math.PI / 3; // Me: 90°, Enemy: 60°
       const isCloseRange = distance < 400; // Close enough for head-to-head
       
       return isHeadToHead && isCloseRange;
