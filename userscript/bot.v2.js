@@ -226,12 +226,12 @@ The MIT License (MIT)
     baseSafetyMargin = 50;
     boostSpeedThreshold = 6.5;
     
-    // Turn radius constants (from v3 - accurate physics)
-    turnRadiusBase = 50;
-    lengthMultiplier = 0.05;
-    speedMultiplier = 1.2;
-    boostTurnPenalty = 2.0;  // Conservative for worst-case
-    massMultiplier = 0.3;
+    // Turn radius constants (EXACT VALUES FROM V3)
+    turnRadiusBase = 50;           // Base turn radius in pixels
+    lengthMultiplier = 0.05;       // How much snake length affects turning
+    speedMultiplier = 1.2;         // How much speed affects turning
+    boostTurnPenalty = 0.756;      // CRITICAL: V3's exact boost penalty
+    massMultiplier = 0.3;          // How much snake mass affects turning
     
     // Trajectory projection parameters (FIXED)
     projectionTime = 2.0; // 2 seconds ahead - adjustable constant
@@ -513,57 +513,67 @@ The MIT License (MIT)
       const targetRadius = this.getSnakeWidth(targetSnake.sc) / 2;
       const targetSpeed = targetSnake.sp || 5.78;
       
-      // Calculate my maximum turn trajectory (worst-case scenario)
-      const myMaxTurnTrajectory = this.calculateMaxTurnTrajectory(window.slither);
+      // Calculate my maximum turn trajectory (both sides)
+      const myTrajectories = this.calculateMaxTurnTrajectory(window.slither);
       
-      // CRITICAL FIX: Head center to snake edge collision
-      // My head center must not touch their edge = myRadius + theirRadius
-      const centerToEdgeDistance = snakeRadius + targetRadius;
+      // CRITICAL FIX: Front of head to snake edge collision
+      // The front point of my head circle must not touch their edge
+      const frontToEdgeDistance = snakeRadius + targetRadius;
 
-      // Check head collision with trajectory projection
-      const headCollision = this.checkTrajectoryCollision(
-        myMaxTurnTrajectory, 
-        { x: targetSnake.xx, y: targetSnake.yy }, 
-        targetRadius,
-        centerToEdgeDistance
-      );
+      // Check both left and right trajectories
+      const trajectories = [
+        { points: myTrajectories.left, side: 'left' },
+        { points: myTrajectories.right, side: 'right' }
+      ];
 
-      if (headCollision) {
-        this.dangerZones.push({
-          point: { x: targetSnake.xx, y: targetSnake.yy },
-          distance: headCollision.distance,
-          radius: centerToEdgeDistance,
-          timeToCollision: headCollision.timeToCollision,
-          type: 'snake_head',
-          snakeId: targetSnake.id,
-          isBoosting: targetSpeed > this.boostSpeedThreshold,
-          collisionPoint: headCollision.collisionPoint
-        });
-      }
+      for (const traj of trajectories) {
+        // Check head collision with trajectory projection
+        const headCollision = this.checkTrajectoryCollision(
+          traj.points, 
+          { x: targetSnake.xx, y: targetSnake.yy }, 
+          targetRadius,
+          frontToEdgeDistance
+        );
 
-      // Check body collision with trajectory projection
-      if (targetSnake.pts) {
-        for (let i = 0; i < targetSnake.pts.length; i++) {
-          const bodyPart = targetSnake.pts[i];
-          if (!bodyPart || bodyPart.dying) continue;
+        if (headCollision) {
+          this.dangerZones.push({
+            point: { x: targetSnake.xx, y: targetSnake.yy },
+            distance: headCollision.distance,
+            radius: frontToEdgeDistance,
+            timeToCollision: headCollision.timeToCollision,
+            type: 'snake_head',
+            snakeId: targetSnake.id,
+            isBoosting: targetSpeed > this.boostSpeedThreshold,
+            collisionPoint: headCollision.collisionPoint,
+            trajectoryType: traj.side
+          });
+        }
 
-          const bodyCollision = this.checkTrajectoryCollision(
-            myMaxTurnTrajectory,
-            { x: bodyPart.xx, y: bodyPart.yy },
-            targetRadius,
-            centerToEdgeDistance
-          );
+        // Check body collision with trajectory projection
+        if (targetSnake.pts) {
+          for (let i = 0; i < targetSnake.pts.length; i++) {
+            const bodyPart = targetSnake.pts[i];
+            if (!bodyPart || bodyPart.dying) continue;
 
-          if (bodyCollision) {
-            this.dangerZones.push({
-              point: { x: bodyPart.xx, y: bodyPart.yy },
-              distance: bodyCollision.distance,
-              radius: centerToEdgeDistance,
-              timeToCollision: bodyCollision.timeToCollision,
-              type: 'snake_body',
-              bodyIndex: i,
-              collisionPoint: bodyCollision.collisionPoint
-            });
+            const bodyCollision = this.checkTrajectoryCollision(
+              traj.points,
+              { x: bodyPart.xx, y: bodyPart.yy },
+              targetRadius,
+              frontToEdgeDistance
+            );
+
+            if (bodyCollision) {
+              this.dangerZones.push({
+                point: { x: bodyPart.xx, y: bodyPart.yy },
+                distance: bodyCollision.distance,
+                radius: frontToEdgeDistance,
+                timeToCollision: bodyCollision.timeToCollision,
+                type: 'snake_body',
+                bodyIndex: i,
+                collisionPoint: bodyCollision.collisionPoint,
+                trajectoryType: traj.side
+              });
+            }
           }
         }
       }
@@ -571,14 +581,18 @@ The MIT License (MIT)
 
     // Calculate maximum turn trajectory using v3's accurate arc formula
     calculateMaxTurnTrajectory(snake) {
-      if (!snake) return [];
+      if (!snake) return { left: [], right: [] };
 
-      // Use v3's accurate turn arc calculation
-      const leftArc = this.calculateTurnArc(snake, -1); // Left turn (worst case)
+      // Use v3's accurate turn arc calculation for BOTH sides
+      const leftArc = this.calculateTurnArc(snake, -1); // Left turn
       const rightArc = this.calculateTurnArc(snake, 1); // Right turn
       
-      // Return the longer arc (worst case for collision detection)
-      return leftArc.points.length > rightArc.points.length ? leftArc.points : rightArc.points;
+      return {
+        left: leftArc.points,
+        right: rightArc.points,
+        leftArc: leftArc,
+        rightArc: rightArc
+      };
     }
 
     // Calculate turn arc using v3's accurate formula
@@ -600,13 +614,19 @@ The MIT License (MIT)
         const t = i / this.arcResolution;
         const angle = startAngle + direction * this.arcLength * t;
 
-        arcPoints.push({
-          x: turnCenterX + Math.cos(angle) * turnRadius,
-          y: turnCenterY + Math.sin(angle) * turnRadius,
-          time: (t * this.arcLength * turnRadius) / snake.sp, // Accurate time calculation
-          speed: snake.sp,
-          turnRadius: turnRadius
-        });
+                 // Calculate arc distance traveled
+         const arcDistance = t * this.arcLength * turnRadius;
+         // Time = distance / speed (in seconds, converting from pixels/frame to pixels/second)
+         const timeToPoint = arcDistance / (snake.sp * 60); // 60 fps conversion
+         
+         arcPoints.push({
+           x: turnCenterX + Math.cos(angle) * turnRadius,
+           y: turnCenterY + Math.sin(angle) * turnRadius,
+           time: timeToPoint, // Fixed time calculation
+           speed: snake.sp,
+           turnRadius: turnRadius,
+           arcDistance: arcDistance
+         });
       }
 
       return {
@@ -733,10 +753,13 @@ The MIT License (MIT)
       // 🔍 DEBUG: Verify collision objects
       this.drawCollisionDebugInfo(headPos, snakeRadius);
 
-      // Draw my maximum turn trajectory (now curved!)
+      // Draw my maximum turn trajectories (both sides!)
       if (window.slither) {
-        const myTrajectory = this.calculateMaxTurnTrajectory(window.slither);
-        this.drawTrajectoryArc(myTrajectory, "cyan", 2);
+        const myTrajectories = this.calculateMaxTurnTrajectory(window.slither);
+        // Draw left trajectory in cyan
+        this.drawTrajectoryArc(myTrajectories.left, "cyan", 2);
+        // Draw right trajectory in blue
+        this.drawTrajectoryArc(myTrajectories.right, "blue", 2);
       }
 
       // Draw user intent direction
@@ -794,6 +817,9 @@ The MIT License (MIT)
 
     // 🔍 DEBUG: Draw collision verification objects
     drawCollisionDebugInfo(headPos, snakeRadius) {
+      const mySnake = window.slither;
+      if (!mySnake) return;
+
       // Draw MY head center (bright green dot)
       this.visualizer.drawCircle(
         { x: headPos.x, y: headPos.y, r: 3 },
@@ -806,16 +832,22 @@ The MIT License (MIT)
         "lime", false, 0.8
       );
 
-      // Draw front of my head (green line)
-      const frontDistance = snakeRadius + 10;
-      const mySnake = window.slither;
-      if (mySnake) {
-        const frontPoint = {
-          x: headPos.x + Math.cos(mySnake.ang) * frontDistance,
-          y: headPos.y + Math.sin(mySnake.ang) * frontDistance
-        };
-        this.visualizer.drawLine(headPos, frontPoint, "lime", 3);
-      }
+      // CRITICAL: Draw the actual FRONT COLLISION POINT (what kills me)
+      const frontCollisionPoint = {
+        x: headPos.x + Math.cos(mySnake.ang) * snakeRadius,
+        y: headPos.y + Math.sin(mySnake.ang) * snakeRadius
+      };
+      this.visualizer.drawCircle(
+        { x: frontCollisionPoint.x, y: frontCollisionPoint.y, r: 4 },
+        "red", true, 1.0
+      );
+
+      // Draw direction line
+      const frontLineEnd = {
+        x: headPos.x + Math.cos(mySnake.ang) * (snakeRadius + 15),
+        y: headPos.y + Math.sin(mySnake.ang) * (snakeRadius + 15)
+      };
+      this.visualizer.drawLine(headPos, frontLineEnd, "lime", 3);
 
       // Draw OTHER snakes' edges and centers
       for (const snake of window.slithers) {
@@ -835,12 +867,18 @@ The MIT License (MIT)
           "red", false, 0.5
         );
 
-        // Draw collision distance (what we actually check)
-        const collisionDistance = snakeRadius + otherRadius;
-        this.visualizer.drawCircle(
-          { x: snake.xx, y: snake.yy, r: collisionDistance },
-          "yellow", false, 0.3
-        );
+        // Draw body edges for verification
+        if (snake.pts) {
+          for (let i = 0; i < Math.min(snake.pts.length, 10); i++) { // Only first 10 segments
+            const bodyPart = snake.pts[i];
+            if (!bodyPart || bodyPart.dying) continue;
+            
+            this.visualizer.drawCircle(
+              { x: bodyPart.xx, y: bodyPart.yy, r: otherRadius },
+              "orange", false, 0.3
+            );
+          }
+        }
       }
     }
 
