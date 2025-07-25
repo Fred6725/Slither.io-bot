@@ -897,95 +897,178 @@ The MIT License (MIT)
       return fastAtan2(closestPoint.y - currentPos.y, closestPoint.x - currentPos.x);
     }
 
-    // Simple reactive collision detection - no prediction needed
+    // IMPROVED: Trajectory-based collision detection with prediction
     detectReactiveCollisions(headPos, headAngle, snakeRadius, snakeSpeed, snakes, borderSize) {
-      const lookAheadVector = {
-        x: Math.cos(headAngle) * this.lookaheadDistance,
-        y: Math.sin(headAngle) * this.lookaheadDistance
-      };
-
-      // Check collision with other snakes (current positions only)
+      // Adjust time horizon based on speed (fixes boost detection issues)
+      const timeHorizon = snakeSpeed > 7 ? 1.2 : 2.5; // Shorter for boost, longer for normal
+      
+      // Check collision with other snakes using trajectory prediction
       for (const snake of snakes) {
         if (!snake || snake.id === window.slither.id) continue;
 
-        const currentSpeed = snake.sp || 5.78;
-        const isBoosting = currentSpeed > this.boostSpeedThreshold;
+        const enemySpeed = snake.sp || 5.78;
+        const enemyAngle = snake.ang || 0;
 
-        this.checkReactiveSnakeCollision(headPos, lookAheadVector, snakeRadius, snakeSpeed, snake, isBoosting);
+        this.checkTrajectorySnakeCollision(headPos, headAngle, snakeRadius, snakeSpeed, snake, enemySpeed, enemyAngle, timeHorizon);
       }
 
-      // Check collision with borders
-      this.checkBorderCollision(headPos, lookAheadVector, snakeRadius, borderSize);
+      // Check collision with borders (still static)
+      this.checkBorderCollision(headPos, headAngle, snakeRadius, borderSize, timeHorizon);
     }
 
-    // Simple reactive snake collision detection
-    checkReactiveSnakeCollision(headPos, lookAheadVector, snakeRadius, snakeSpeed, targetSnake, targetIsBoosting) {
+    // IMPROVED: Trajectory-based snake collision detection
+    checkTrajectorySnakeCollision(headPos, headAngle, snakeRadius, snakeSpeed, targetSnake, enemySpeed, enemyAngle, timeHorizon) {
       if (!targetSnake.pts || targetSnake.pts.length < 1) return;
 
+      // FIXED: Skip our own snake entirely (prevents self-detection)
+      if (targetSnake.id === window.slither.id) return;
+
       const targetRadius = this.getSnakeWidth(targetSnake.sc) / 2;
-      const baseSafeDistance = snakeRadius + targetRadius + this.safetyMargin;
+      const collisionRadius = snakeRadius + targetRadius + 15; // Conservative but not excessive
 
-      // Advanced speed-based safety calculations (same as before)
-      const mySpeed = snakeSpeed;
-      const isBoosting = mySpeed > 6.0;
+      // Check HEAD trajectory collision (moving target)
+      const headCollision = this.checkTrajectoryCollision(
+        headPos.x, headPos.y, snakeSpeed, headAngle,
+        targetSnake.xx, targetSnake.yy, enemySpeed, enemyAngle,
+        timeHorizon, collisionRadius
+      );
 
-      // Calculate combined speed factor for safety distance
-      let speedMultiplier = 1.0;
-      if (isBoosting && targetIsBoosting) {
-        speedMultiplier = 3.5; // Both boosting - very dangerous
-      } else if (isBoosting || targetIsBoosting) {
-        speedMultiplier = 2.5; // One boosting - dangerous
-      } else {
-        speedMultiplier = 1.5; // Normal speeds
-      }
-
-      // Add extra margin based on relative speeds
-      const targetSpeed = targetSnake.sp || 5.78;
-      const relativeSpeed = Math.abs(mySpeed - targetSpeed);
-      const speedBonus = Math.min(relativeSpeed * 10, 50); // Max 50 extra pixels
-
-      const safeDistance = baseSafeDistance * speedMultiplier + speedBonus;
-
-      // Check collision with current head position (reactive only)
-      const currentHeadDistance = Math.sqrt(getDistance2(headPos.x, headPos.y, targetSnake.xx, targetSnake.yy));
-      if (currentHeadDistance < safeDistance) {
-        const approachAngle = this.calculateApproachAngle(headPos, { x: targetSnake.xx, y: targetSnake.yy }, lookAheadVector);
-        const dangerLevel = this.calculateDangerLevel(currentHeadDistance, safeDistance, approachAngle);
+      if (headCollision.willCollide && headCollision.timeToCollision < timeHorizon) {
+        // Only add to danger zones if actual collision predicted
+        const dangerLevel = this.calculateTrajectoryDangerLevel(headCollision.timeToCollision, headCollision.closestDistance);
 
         this.dangerZones.push({
           point: { x: targetSnake.xx, y: targetSnake.yy },
-          distance: currentHeadDistance,
-          radius: safeDistance,
-          approachAngle: approachAngle,
+          distance: headCollision.closestDistance,
+          radius: collisionRadius,
+          timeToCollision: headCollision.timeToCollision,
           dangerLevel: dangerLevel,
-          type: 'snake',
-          isBoosting: targetIsBoosting,
+          type: 'snake_head',
+          trajectoryBased: true,
           snakeId: targetSnake.id
         });
       }
 
-      // Check snake body collision - mark dangerous body parts with orange dots
+      // Check BODY trajectory collision (static obstacles)
       const pts = targetSnake.pts;
-      for (let i = 0; i < pts.length; i++) {
+      for (let i = 0; i < pts.length; i += 2) { // Skip every other point for performance
         const bodyPart = pts[i];
         if (!bodyPart || bodyPart.dying) continue;
 
-        const bodyDistance = Math.sqrt(getDistance2(headPos.x, headPos.y, bodyPart.xx, bodyPart.yy));
-        if (bodyDistance < safeDistance) {
-          const approachAngle = this.calculateApproachAngle(headPos, { x: bodyPart.xx, y: bodyPart.yy }, lookAheadVector);
-          const dangerLevel = this.calculateDangerLevel(bodyDistance, safeDistance, approachAngle);
+        const bodyCollision = this.checkLineToPointCollision(
+          headPos.x, headPos.y, snakeSpeed, headAngle,
+          bodyPart.xx, bodyPart.yy, timeHorizon, collisionRadius * 0.8
+        );
+
+        if (bodyCollision.willCollide && bodyCollision.timeToCollision < timeHorizon) {
+          const dangerLevel = this.calculateTrajectoryDangerLevel(bodyCollision.timeToCollision, bodyCollision.distance);
 
           this.dangerZones.push({
             point: { x: bodyPart.xx, y: bodyPart.yy },
-            distance: bodyDistance,
-            radius: safeDistance,
-            approachAngle: approachAngle,
+            distance: bodyCollision.distance,
+            radius: collisionRadius * 0.8,
+            timeToCollision: bodyCollision.timeToCollision,
             dangerLevel: dangerLevel,
-            type: 'snake_body', // Mark as body part for orange dot visualization
+            type: 'snake_body',
+            trajectoryBased: true,
             bodyIndex: i
           });
         }
       }
+    }
+
+    // TRAJECTORY COLLISION MATH - From our improved system
+    checkTrajectoryCollision(x1, y1, speed1, angle1, x2, y2, speed2, angle2, timeHorizon, collisionRadius = 25) {
+      // Convert to velocity vectors
+      const vx1 = Math.cos(angle1) * speed1;
+      const vy1 = Math.sin(angle1) * speed1;
+      const vx2 = Math.cos(angle2) * speed2;
+      const vy2 = Math.sin(angle2) * speed2;
+      
+      // Relative position and velocity
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const dvx = vx2 - vx1;
+      const dvy = vy2 - vy1;
+      
+      // Quadratic equation coefficients for closest approach
+      const a = dvx * dvx + dvy * dvy;
+      const b = 2 * (dx * dvx + dy * dvy);
+      const c = dx * dx + dy * dy;
+      
+      // If velocities are identical, check current distance
+      if (Math.abs(a) < 1e-10) {
+        const distance = Math.sqrt(c);
+        return {
+          willCollide: distance < collisionRadius,
+          timeToCollision: distance < collisionRadius ? 0 : Infinity,
+          closestDistance: distance
+        };
+      }
+      
+      // Time of closest approach
+      const t = -b / (2 * a);
+      
+      // Check if collision happens within time horizon
+      if (t < 0 || t > timeHorizon) {
+        return { willCollide: false, timeToCollision: Infinity, closestDistance: Infinity };
+      }
+      
+      // Distance at closest approach
+      const closestDistance = Math.sqrt(a * t * t + b * t + c);
+      
+      return {
+        willCollide: closestDistance < collisionRadius,
+        timeToCollision: closestDistance < collisionRadius ? t : Infinity,
+        closestDistance: closestDistance
+      };
+    }
+    
+    // Check collision with static point (body parts)
+    checkLineToPointCollision(x, y, speed, angle, pointX, pointY, timeHorizon, collisionRadius = 20) {
+      const vx = Math.cos(angle) * speed;
+      const vy = Math.sin(angle) * speed;
+      
+      // Vector from current position to point
+      const dx = pointX - x;
+      const dy = pointY - y;
+      
+      // Project point onto trajectory line
+      const dotProduct = dx * vx + dy * vy;
+      const velocityMagnitudeSquared = vx * vx + vy * vy;
+      
+      if (velocityMagnitudeSquared < 1e-10) {
+        return { willCollide: false, timeToCollision: Infinity, distance: Infinity };
+      }
+      
+      const t = dotProduct / velocityMagnitudeSquared;
+      
+      // Check if collision point is in the future and within time horizon
+      if (t < 0 || t > timeHorizon) {
+        return { willCollide: false, timeToCollision: Infinity, distance: Infinity };
+      }
+      
+      // Calculate closest point on trajectory
+      const closestX = x + vx * t;
+      const closestY = y + vy * t;
+      
+      // Distance from point to trajectory
+      const distance = Math.sqrt((pointX - closestX) ** 2 + (pointY - closestY) ** 2);
+      
+      return {
+        willCollide: distance < collisionRadius,
+        timeToCollision: distance < collisionRadius ? t : Infinity,
+        distance: distance
+      };
+    }
+
+    // Calculate danger level based on trajectory timing
+    calculateTrajectoryDangerLevel(timeToCollision, distance) {
+      // Closer in time = more dangerous
+      const timeFactor = Math.max(0, 1 - (timeToCollision / 2.0)); // 0-1 scale
+      const distanceFactor = Math.max(0, 1 - (distance / 100)); // 0-1 scale
+      
+      return Math.min(100, (timeFactor * 70) + (distanceFactor * 30)); // Max 100
     }
 
     // Adjust collision parameters based on snake speed and size
@@ -1033,17 +1116,25 @@ The MIT License (MIT)
       return Math.round(sc * 29);
     }
 
-    // Check collision with game borders
-    checkBorderCollision(headPos, lookAheadVector, snakeRadius, borderSize) {
+    // Check collision with game borders using trajectory
+    checkBorderCollision(headPos, headAngle, snakeRadius, borderSize, timeHorizon) {
       const safeDistance = snakeRadius + this.safetyMargin;
 
-      // Check game boundary walls using actual game border logic
+      // Check game boundary walls using trajectory prediction
       if (window.grd) {
         const borderDist = window.grd - safeDistance;
         const distanceToCenter = Math.sqrt(getDistance2(headPos.x, headPos.y, window.grd, window.grd));
 
-        if (distanceToCenter > borderDist) {
-          // Near border - create danger zone
+        // Check if trajectory leads to border collision
+        const speed = window.slither ? window.slither.sp : 5.78;
+        const trajectoryLength = speed * timeHorizon;
+        
+        const futureX = headPos.x + Math.cos(headAngle) * trajectoryLength;
+        const futureY = headPos.y + Math.sin(headAngle) * trajectoryLength;
+        const futureDistanceToCenter = Math.sqrt(getDistance2(futureX, futureY, window.grd, window.grd));
+
+        if (futureDistanceToCenter > borderDist || distanceToCenter > borderDist * 0.8) {
+          // Trajectory leads to border or already close - create danger zone
           const borderAngle = fastAtan2(window.grd - headPos.y, window.grd - headPos.x);
           const borderPoint = {
             x: window.grd + Math.cos(borderAngle) * window.grd,
@@ -1051,16 +1142,17 @@ The MIT License (MIT)
           };
 
           const distance = Math.sqrt(getDistance2(headPos.x, headPos.y, borderPoint.x, borderPoint.y));
-          const approachAngle = this.calculateApproachAngle(headPos, borderPoint, lookAheadVector);
-          const dangerLevel = this.calculateDangerLevel(distance, safeDistance, approachAngle);
+          const timeToCollision = Math.max(0.1, (borderDist - distanceToCenter) / speed);
+          const dangerLevel = this.calculateTrajectoryDangerLevel(timeToCollision, distance);
 
           this.dangerZones.push({
             point: borderPoint,
             distance: distance,
             radius: safeDistance,
-            approachAngle: approachAngle,
+            timeToCollision: timeToCollision,
             dangerLevel: dangerLevel,
-            type: 'border'
+            type: 'border',
+            trajectoryBased: true
           });
         }
       }
