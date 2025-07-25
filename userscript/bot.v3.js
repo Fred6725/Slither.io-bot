@@ -294,7 +294,7 @@ The MIT License (MIT)
       }
 
       // Calculate avoidance direction (collision avoidance only - combat removed)
-      const finalAngle = this.calculateAvoidanceDirection(headPos, headAngle, snakeRadius);
+      const finalAngle = this.calculateFullControlAvoidance(headPos, headAngle, snakeRadius);
 
       // Apply visual debugging if enabled
       if (this.visualsEnabled) {
@@ -2033,52 +2033,7 @@ The MIT License (MIT)
         }
       }
 
-      // Phase 3: Draw combat mode indicators
-      const combatDecision = this.lastCombatDecision;
-      
-      // Always show combat mode status when enabled
-      if (this.combatModeEnabled) {
-        // Draw combat mode indicator (small blue circle when active)
-        this.visualizer.drawCircle(
-          { x: mySnake.xx - 50, y: mySnake.yy - 50, r: 8 },
-          "blue", true, 0.6
-        );
-      }
-      
-      if (combatDecision && combatDecision.hasOpportunity) {
-        let modeColor, modeText;
-        
-        switch (combatDecision.mode) {
-          case 'EMERGENCY_DEFENSE':
-            modeColor = "red";
-            modeText = "🛡️ DEFENSE";
-            break;
-          case 'AGGRESSIVE_ATTACK':
-            modeColor = "lime";
-            modeText = "⚔️ ATTACK";
-            // Draw attack target line
-            if (combatDecision.attackPoint) {
-              this.visualizer.drawLine(
-                { x: mySnake.xx, y: mySnake.yy },
-                combatDecision.attackPoint,
-                "lime", 4
-              );
-            }
-            break;
-          case 'TACTICAL_MANEUVER':
-            modeColor = "yellow";
-            modeText = "🧠 TACTICAL";
-            break;
-        }
-        
-        // Draw mode indicator near snake head
-        this.visualizer.drawCircle(
-          { x: mySnake.xx + 50, y: mySnake.yy - 50, r: 15 },
-          modeColor, true, 0.8
-        );
-        
-        console.log(`Combat Mode: ${modeText} - ${combatDecision.reason}`);
-      }
+      // Combat mode visualization removed
 
       // Draw turn radius info text
       const turnRadius = this.calculateTurnRadius(mySnake);
@@ -3362,7 +3317,7 @@ The MIT License (MIT)
   var collisionAvoidanceState = state2(false);
   var collisionVisualsState = state2(false);
   var enhancedCollisionState = state2(false);
-  var combatModeState = state2(true);
+  // Combat mode removed
   var fpsState = state2(0);
   var pingState = state2("0ms");
   var serverState = state2("[0:0:0:0:0:0:0:0]:444");
@@ -3470,13 +3425,7 @@ The MIT License (MIT)
           getToggleValue(enhancedCollisionState)
         )
       ]),
-      div({ class: "pref-overlay__item" }, [
-        span({ class: "pref-overlay__label" }, "[C] Combat Mode: "),
-        span(
-          { class: getToggleClass(combatModeState) },
-          getToggleValue(combatModeState)
-        )
-      ]),
+      // Combat mode removed
       div({ class: "pref-overlay__item" }, [
         span({ class: "pref-overlay__label" }, "Control Mode: "),
         span(
@@ -3618,11 +3567,7 @@ The MIT License (MIT)
       enhancedCollisionState.val = !enhancedCollisionState.val;
       collisionAvoidance.enabled = enhancedCollisionState.val;
     },
-    c: () => {
-      collisionAvoidance.combatModeEnabled = !collisionAvoidance.combatModeEnabled;
-      combatModeState.val = collisionAvoidance.combatModeEnabled;
-      console.log(`🎯 Combat Mode: ${collisionAvoidance.combatModeEnabled ? 'ENABLED' : 'DISABLED'}`);
-    }
+    // c: Combat mode removed
   };
   var initEventListeners = () => {
     const original_onmousedown = window.onmousedown?.bind(window) ?? (() => {
@@ -3708,38 +3653,7 @@ The MIT License (MIT)
         }
       }
 
-      // Run combat mode independently when enabled (works with or without bot/collision avoidance)
-      if (window.playing && collisionAvoidance.combatModeEnabled && window.slither) {
-        // Get combat decision without full collision detection
-        const combatDecision = collisionAvoidance.evaluateCombatSituation(
-          window.slither,
-          window.slithers,
-          { x: window.slither.xx, y: window.slither.yy },
-          window.slither.ang,
-          collisionAvoidance.getSnakeWidth(window.slither.sc) / 2
-        );
-
-        // Only take control during combat situations
-        if (combatDecision.hasOpportunity) {
-          const combatDirection = collisionAvoidance.calculateCombatAwareDirection(
-            { x: window.slither.xx, y: window.slither.yy },
-            window.slither.ang,
-            collisionAvoidance.getSnakeWidth(window.slither.sc) / 2,
-            combatDecision
-          );
-
-          if (combatDirection !== null) {
-            // Combat mode takes control
-            const newX = window.slither.xx + Math.cos(combatDirection) * 100;
-            const newY = window.slither.yy + Math.sin(combatDirection) * 100;
-
-            window.xm = newX - window.view_xx;
-            window.ym = newY - window.view_yy;
-
-            console.log(`🎯 COMBAT CONTROL: ${combatDecision.mode} - Direction ${(combatDirection * 180 / Math.PI).toFixed(1)}°`);
-          }
-        }
-      }
+      // Combat mode removed - collision avoidance only
 
       // Always run visual debugging if enabled
       if (window.playing && collisionAvoidance.visualsEnabled && window.slither) {
