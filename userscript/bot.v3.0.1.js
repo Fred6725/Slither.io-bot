@@ -3087,7 +3087,9 @@ The MIT License (MIT)
     }
   };
   var resetZoom = () => {
-    zoom.set(window.sgsc);
+    if (window.sgsc) {
+      zoom.set(window.sgsc);
+    }
   };
   var keyMap = {
     t: () => {
@@ -3149,8 +3151,12 @@ The MIT License (MIT)
     });
     function handleKeydown(e) {
       const key = e.key.toLowerCase();
-      console.log(key);
-      keyMap[key]?.();
+      console.log(`🎮 Key pressed: ${key}`);
+      try {
+        keyMap[key]?.();
+      } catch (error) {
+        console.error(`❌ Error handling key ${key}:`, error);
+      }
     }
     function handleMousedown(e) {
       if (window.playing) {
@@ -3187,6 +3193,15 @@ The MIT License (MIT)
   // src/index.ts
   var isBotRunning = false;
   var init = () => {
+    console.log('🚀 Bot initializing...');
+    console.log('Game state check:', {
+      oef: typeof window.oef,
+      connect: typeof window.connect,
+      slither: typeof window.slither,
+      playing: typeof window.playing,
+      gsc: typeof window.gsc
+    });
+    
     const original_oef = window.oef;
     const original_connect = window.connect;
     window.oef = () => {
@@ -3294,7 +3309,9 @@ The MIT License (MIT)
     };
     appendCss(style_default);
     initEventListeners();
-    zoom.set(window.gsc);
+    if (window.gsc) {
+      zoom.set(window.gsc);
+    }
   };
   var findGameScript = async () => {
     const abortController = new AbortController();
