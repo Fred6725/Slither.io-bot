@@ -234,15 +234,15 @@ The MIT License (MIT)
     boostSpeedThreshold = 6.5;
 
     // Turn Radius Calibration Constants (ADJUST THESE!)
-    turnRadiusBase = 50;           // Base turn radius in pixels
+    turnRadiusBase = 45;           // Base turn radius in pixels
     lengthMultiplier = 0.05;         // How much snake length affects turning (0.5-2.0)
     speedMultiplier = 1.2;          // How much speed affects turning (0.8-2.0)
-    boostTurnPenalty = 0.756;         // Turn radius multiplier when boosting (1.5-4.0)
+    boostTurnPenalty = 0.84;         // Turn radius multiplier when boosting (1.5-4.0)
     massMultiplier = 0.3;           // How much snake mass affects turning (0.1-1.0)
 
     // Turn visualization settings
     showTurnArcs = true;            // Show predicted turn arcs
-    arcResolution = 32;             // Number of points in arc (16-64)
+    arcResolution = 16;             // Number of points in arc (16-64)
     arcLength = Math.PI;            // How much of turn arc to show (π/2 to 2π)
 
     // Full control mode parameters
@@ -250,9 +250,7 @@ The MIT License (MIT)
     lastControlAngle = 0;
     controlActive = false;
 
-    // Combat mode parameters
-    combatModeEnabled = true; // Enable/disable Phase 3 combat decisions
-    lastCombatDecision = null;
+    // Combat mode removed - focus on collision avoidance only
 
     // Dynamic parameters (calculated each frame)
     lookaheadDistance = 200;
@@ -289,30 +287,14 @@ The MIT License (MIT)
       // Phase 3: Combat Decision Engine
       // =====================================
       
-      // Analyze combat opportunities and threats (Phase 3)
-      let combatDecision = { mode: 'PASSIVE', hasOpportunity: false, reason: 'Combat mode disabled' };
-      if (this.combatModeEnabled) {
-        combatDecision = this.evaluateCombatSituation(snake, snakes, headPos, headAngle, snakeRadius);
-      }
-      this.lastCombatDecision = combatDecision; // Store for visualization
-      
-      // Debug output
-      if (this.dangerZones.length > 0 || combatDecision.hasOpportunity) {
+      // Debug output for collision avoidance only
+      if (this.dangerZones.length > 0) {
         const isBoosting = snake.sp > 6.0;
-        console.log(`Enhanced Collision Avoidance: ${this.dangerZones.length} dangers, closest: ${this.dangerZones[0]?.distance?.toFixed(0)}px, boost: ${isBoosting}`);
-        
-        if (combatDecision.hasOpportunity) {
-          console.log(`🎯 COMBAT: ${combatDecision.mode} - ${combatDecision.reason}`);
-        }
+        console.log(`🛡️ Collision Avoidance: ${this.dangerZones.length} dangers, closest: ${this.dangerZones[0]?.distance?.toFixed(0)}px, boost: ${isBoosting}`);
       }
 
-      // Debug combat mode status (remove this after testing)
-      if (Math.random() < 0.01) { // Log occasionally to verify combat mode is working
-        console.log(`🔧 DEBUG: Combat Mode ${this.combatModeEnabled ? 'ENABLED' : 'DISABLED'}, Decision: ${combatDecision.mode}`);
-      }
-
-      // Calculate direction based on combat decision or avoidance
-      const finalAngle = this.calculateCombatAwareDirection(headPos, headAngle, snakeRadius, combatDecision);
+      // Calculate avoidance direction (collision avoidance only - combat removed)
+      const finalAngle = this.calculateAvoidanceDirection(headPos, headAngle, snakeRadius);
 
       // Apply visual debugging if enabled
       if (this.visualsEnabled) {
