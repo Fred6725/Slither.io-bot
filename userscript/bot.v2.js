@@ -233,14 +233,18 @@ The MIT License (MIT)
     boostTurnPenalty = 2.0;  // Conservative for worst-case
     massMultiplier = 0.3;
     
-    // Trajectory projection parameters
-    projectionTime = 1.0; // 1 second ahead - adjustable constant
+    // Trajectory projection parameters (FIXED)
+    projectionTime = 2.0; // 2 seconds ahead - adjustable constant
     boostAccelerationTime = 0.4; // Time to reach max boost (0.3-0.6s range)
     maxBoostSpeed = 13.5; // Maximum possible speed
     baseSpeed = 5.78; // Normal speed
     
+    // Arc visualization settings (from v3)
+    arcResolution = 32; // Number of points in arc
+    arcLength = Math.PI; // How much of turn arc to show
+    
     // Last-moment intervention timing
-    interventionThreshold = 0.3; // Take control 0.3s before collision
+    interventionThreshold = 0.5; // Take control 0.5s before collision
     
     // Control system
     controlActive = false;
@@ -565,103 +569,87 @@ The MIT License (MIT)
       }
     }
 
-    // Calculate maximum turn trajectory (worst-case scenario)
+    // Calculate maximum turn trajectory using v3's accurate arc formula
     calculateMaxTurnTrajectory(snake) {
       if (!snake) return [];
 
-      const currentSpeed = snake.sp || this.baseSpeed;
-      const headPos = { x: snake.xx, y: snake.yy };
-      const headAngle = snake.ang;
+      // Use v3's accurate turn arc calculation
+      const leftArc = this.calculateTurnArc(snake, -1); // Left turn (worst case)
+      const rightArc = this.calculateTurnArc(snake, 1); // Right turn
       
-      // Model speed progression including boost acceleration
-      const speedProgression = this.calculateSpeedProgression(currentSpeed);
-      
-      // Calculate maximum turn radius at each point in time
-      const trajectoryPoints = [];
-      const timeSteps = 50; // 50 steps over projection time
-      const dt = this.projectionTime / timeSteps;
-      
-      let currentPos = { ...headPos };
-      let currentAngle = headAngle;
-      
-      for (let step = 0; step < timeSteps; step++) {
-        const t = step * dt;
-        const speedAtTime = speedProgression(t);
-        const maxTurnRadius = this.calculateTurnRadiusAtSpeed(snake, speedAtTime);
-        
-        // Maximum turn rate (worst case - hardest possible turn)
-        const maxTurnRate = speedAtTime / maxTurnRadius;
-        
-        // Calculate position if turning at maximum rate
-        const deltaAngle = maxTurnRate * dt;
-        currentAngle += deltaAngle; // Assume maximum left turn (worst case)
-        
-        const velocity = {
-          x: Math.cos(currentAngle) * speedAtTime,
-          y: Math.sin(currentAngle) * speedAtTime
-        };
-        
-        currentPos.x += velocity.x * dt * 60; // Convert to pixels (60 fps)
-        currentPos.y += velocity.y * dt * 60;
-        
-        trajectoryPoints.push({
-          x: currentPos.x,
-          y: currentPos.y,
-          time: t,
-          speed: speedAtTime,
-          turnRadius: maxTurnRadius
-        });
-      }
-      
-      return trajectoryPoints;
+      // Return the longer arc (worst case for collision detection)
+      return leftArc.points.length > rightArc.points.length ? leftArc.points : rightArc.points;
     }
 
-    // Calculate speed progression over time (including boost acceleration)
-    calculateSpeedProgression(currentSpeed) {
-      return (t) => {
-        if (currentSpeed <= this.baseSpeed) {
-          // Not boosting - could start boosting
-          const accelerationTime = Math.min(t, this.boostAccelerationTime);
-          const accelerationProgress = accelerationTime / this.boostAccelerationTime;
-          return this.baseSpeed + (this.maxBoostSpeed - this.baseSpeed) * accelerationProgress;
-        } else {
-          // Already boosting - could go to max speed
-          const remainingAcceleration = this.maxBoostSpeed - currentSpeed;
-          const timeToMax = this.boostAccelerationTime * (remainingAcceleration / (this.maxBoostSpeed - this.baseSpeed));
-          const accelerationTime = Math.min(t, timeToMax);
-          const accelerationProgress = timeToMax > 0 ? accelerationTime / timeToMax : 1;
-          return currentSpeed + remainingAcceleration * accelerationProgress;
-        }
+    // Calculate turn arc using v3's accurate formula
+    calculateTurnArc(snake, direction) {
+      const centerX = snake.xx;
+      const centerY = snake.yy;
+      const currentAngle = snake.ang;
+      const turnRadius = this.calculateAccurateTurnRadius(snake);
+
+      // Calculate turn center (perpendicular to current direction)
+      const turnCenterX = centerX + Math.cos(currentAngle + direction * Math.PI / 2) * turnRadius;
+      const turnCenterY = centerY + Math.sin(currentAngle + direction * Math.PI / 2) * turnRadius;
+
+      // Generate arc points
+      const arcPoints = [];
+      const startAngle = currentAngle + direction * Math.PI / 2 + Math.PI;
+
+      for (let i = 0; i <= this.arcResolution; i++) {
+        const t = i / this.arcResolution;
+        const angle = startAngle + direction * this.arcLength * t;
+
+        arcPoints.push({
+          x: turnCenterX + Math.cos(angle) * turnRadius,
+          y: turnCenterY + Math.sin(angle) * turnRadius,
+          time: (t * this.arcLength * turnRadius) / snake.sp, // Accurate time calculation
+          speed: snake.sp,
+          turnRadius: turnRadius
+        });
+      }
+
+      return {
+        points: arcPoints,
+        center: { x: turnCenterX, y: turnCenterY },
+        radius: turnRadius,
+        direction: direction,
+        startAngle: currentAngle,
+        snake: snake
       };
     }
 
-    // Calculate turn radius at specific speed
-    calculateTurnRadiusAtSpeed(snake, speed) {
+    // Calculate accurate turn radius using v3's exact formula
+    calculateAccurateTurnRadius(snake) {
       const length = this.getSnakeLength(snake);
-      const mass = snake.sc || 1.0;
+      const speed = snake.sp || 5.78;
       const isBoosting = speed > this.boostSpeedThreshold;
+      const mass = snake.sc || 1.0;
 
+      // Base calculation (v3's exact formula)
       let turnRadius = this.turnRadiusBase;
 
-      // Length factor
+      // Length factor: longer snakes turn wider
       const lengthFactor = 1 + (length / 1000) * this.lengthMultiplier;
       turnRadius *= lengthFactor;
 
-      // Speed factor
-      const speedFactor = 1 + ((speed - this.baseSpeed) / this.baseSpeed) * this.speedMultiplier;
+      // Speed factor: faster snakes turn wider
+      const speedFactor = 1 + ((speed - 5.78) / 5.78) * this.speedMultiplier;
       turnRadius *= speedFactor;
 
-      // Boost penalty
+      // Boost penalty: boosting makes turning much harder
       if (isBoosting) {
         turnRadius *= this.boostTurnPenalty;
       }
 
-      // Mass factor
+      // Mass factor: bigger snakes turn wider
       const massFactor = 1 + (mass - 1) * this.massMultiplier;
       turnRadius *= massFactor;
 
-      return Math.max(50, turnRadius);
+      return Math.max(50, turnRadius); // Minimum turn radius of 50 pixels
     }
+
+
 
     // Check if trajectory collides with obstacle
     checkTrajectoryCollision(trajectory, obstaclePos, obstacleRadius, safeDistance) {
@@ -742,7 +730,10 @@ The MIT License (MIT)
     drawDebugVisuals(headPos, headAngle, snakeRadius) {
       if (!this.visualsEnabled) return;
 
-      // Draw my maximum turn trajectory
+      // 🔍 DEBUG: Verify collision objects
+      this.drawCollisionDebugInfo(headPos, snakeRadius);
+
+      // Draw my maximum turn trajectory (now curved!)
       if (window.slither) {
         const myTrajectory = this.calculateMaxTurnTrajectory(window.slither);
         this.drawTrajectoryArc(myTrajectory, "cyan", 2);
@@ -780,7 +771,7 @@ The MIT License (MIT)
             color, true, 0.9
           );
           
-          // Draw time to collision
+          // Draw time to collision (FIXED calculation)
           if (danger.timeToCollision !== undefined) {
             console.log(`⏱️ ${danger.type}: ${(danger.timeToCollision * 1000).toFixed(0)}ms to collision`);
           }
@@ -798,6 +789,58 @@ The MIT License (MIT)
         );
         
         console.log(`🛡️ REACTIVE DEFENSE: ${statusText}`);
+      }
+    }
+
+    // 🔍 DEBUG: Draw collision verification objects
+    drawCollisionDebugInfo(headPos, snakeRadius) {
+      // Draw MY head center (bright green dot)
+      this.visualizer.drawCircle(
+        { x: headPos.x, y: headPos.y, r: 3 },
+        "lime", true, 1.0
+      );
+      
+      // Draw MY head edge (green circle)
+      this.visualizer.drawCircle(
+        { x: headPos.x, y: headPos.y, r: snakeRadius },
+        "lime", false, 0.8
+      );
+
+      // Draw front of my head (green line)
+      const frontDistance = snakeRadius + 10;
+      const mySnake = window.slither;
+      if (mySnake) {
+        const frontPoint = {
+          x: headPos.x + Math.cos(mySnake.ang) * frontDistance,
+          y: headPos.y + Math.sin(mySnake.ang) * frontDistance
+        };
+        this.visualizer.drawLine(headPos, frontPoint, "lime", 3);
+      }
+
+      // Draw OTHER snakes' edges and centers
+      for (const snake of window.slithers) {
+        if (!snake || snake.id === window.slither.id) continue;
+        
+        const otherRadius = this.getSnakeWidth(snake.sc) / 2;
+        
+        // Draw other snake's head center (red dot)
+        this.visualizer.drawCircle(
+          { x: snake.xx, y: snake.yy, r: 2 },
+          "red", true, 0.8
+        );
+        
+        // Draw other snake's head edge (red circle)
+        this.visualizer.drawCircle(
+          { x: snake.xx, y: snake.yy, r: otherRadius },
+          "red", false, 0.5
+        );
+
+        // Draw collision distance (what we actually check)
+        const collisionDistance = snakeRadius + otherRadius;
+        this.visualizer.drawCircle(
+          { x: snake.xx, y: snake.yy, r: collisionDistance },
+          "yellow", false, 0.3
+        );
       }
     }
 
