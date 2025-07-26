@@ -22,6 +22,7 @@ This repository is based on the Championship Edition code and adapted to the new
 | Y | Visual debugging |
 | G | **God Mode Assist enabled/disabled** |
 | X | **God Mode Visuals enabled/disabled** |
+| P | **Trajectory Projection enabled/disabled** |
 | I | Automatic Respawning |
 | F | No graphics mode |
 | H | Hide overlays |
@@ -60,5 +61,16 @@ The bot now includes an experimental **God Mode Assist** - a standalone collisio
 - **Red Text**: "GOD MODE ACTIVE" when system has taken control
 - **Green Line**: Direction of emergency avoidance
 - **Threat Level**: Percentage indicator of current danger
+
+### 🎯 **Trajectory Projection (Press P):**
+- **Dark Blue Line**: Recent movement history (last 5 positions)
+- **Colored Trajectory**: Projected path based on current velocity and turn rate
+  - **Lime**: Straight movement
+  - **Yellow**: Gentle turning
+  - **Orange**: Sharp turning  
+  - **Red**: Very sharp turning
+- **White Dots**: Trajectory points at regular intervals
+- **Magenta Circle**: End point of 2-second projection
+- **Console Info**: Real-time speed, turn rate, and projection time
 
 This system is designed to make you virtually invincible while maintaining the feel of manual gameplay!
