@@ -1675,21 +1675,20 @@ The MIT License (MIT)
     // Update trajectory history with current position and angle
     updateTrajectoryHistory(headPos, headAngle) {
       const timestamp = Date.now();
-      
-      // Add current position and angle to history
+      let radius = 20;
+      if (window.slither) {
+        radius = this.getSnakeWidth(window.slither.sc) / 2;
+      }
       this.trajectoryHistory.push({
         x: headPos.x,
         y: headPos.y,
         angle: headAngle,
-        timestamp: timestamp
+        timestamp: timestamp,
+        radius: radius
       });
-
-      // Keep only the last maxTrajectoryHistory entries
       if (this.trajectoryHistory.length > this.maxTrajectoryHistory) {
         this.trajectoryHistory.shift();
       }
-
-      // Calculate projected trajectory if we have enough history
       if (this.trajectoryHistory.length >= 3) {
         this.calculateProjectedTrajectory();
       }
@@ -1698,68 +1697,49 @@ The MIT License (MIT)
     // Calculate projected trajectory using 3 derivatives
     calculateProjectedTrajectory() {
       if (this.trajectoryHistory.length < 3) return;
-
       const history = this.trajectoryHistory;
       const current = history[history.length - 1];
       const prev = history[history.length - 2];
       const prev2 = history[history.length - 3];
-
-      // Calculate velocity (1st derivative)
-      const dt1 = (current.timestamp - prev.timestamp) / 1000; // Convert to seconds
+      const dt1 = (current.timestamp - prev.timestamp) / 1000;
       const dt2 = (prev.timestamp - prev2.timestamp) / 1000;
-      
-      if (dt1 <= 0 || dt2 <= 0) return; // Avoid division by zero
-
-      const vx1 = (current.x - prev.x) / dt1;
-      const vy1 = (current.y - prev.y) / dt1;
-      const vx2 = (prev.x - prev2.x) / dt2;
-      const vy2 = (prev.y - prev2.y) / dt2;
-
-      // Calculate acceleration (2nd derivative)
-      const ax = (vx1 - vx2) / ((dt1 + dt2) / 2);
-      const ay = (vy1 - vy2) / ((dt1 + dt2) / 2);
-
-      // Calculate angular velocity (1st derivative of angle)
+      if (dt1 <= 0 || dt2 <= 0) return;
+      // Use the snake's angle and radius for the front of the head
+      const radius = current.radius || 20;
+      const headFront = {
+        x: current.x + Math.cos(current.angle) * radius,
+        y: current.y + Math.sin(current.angle) * radius
+      };
+      // Calculate speed based on movement along the heading
+      const dx = current.x - prev.x;
+      const dy = current.y - prev.y;
+      const currentSpeed = Math.sqrt(dx * dx + dy * dy) / dt1;
+      // Calculate angular velocity and acceleration
       const omega1 = this.angleDifference(current.angle, prev.angle) / dt1;
       const omega2 = this.angleDifference(prev.angle, prev2.angle) / dt2;
-
-      // Calculate angular acceleration (2nd derivative of angle)
       const alpha = (omega1 - omega2) / ((dt1 + dt2) / 2);
-
-      // Calculate current speed and direction
-      const currentSpeed = Math.sqrt(vx1 * vx1 + vy1 * vy1);
-      const currentDirection = Math.atan2(vy1, vx1);
-
       // Project trajectory
       this.projectedTrajectoryPoints = [];
       const timeStep = this.trajectoryProjectionTime / this.trajectoryProjectionSteps;
-
       for (let i = 0; i <= this.trajectoryProjectionSteps; i++) {
         const t = i * timeStep;
-        
-        // Use different projection methods based on movement characteristics
         let projectedX, projectedY;
-
-        if (Math.abs(alpha) < 0.1 && Math.abs(omega1) < 0.1) {
-          // Nearly straight movement - use linear projection
-          projectedX = current.x + vx1 * t + 0.5 * ax * t * t;
-          projectedY = current.y + vy1 * t + 0.5 * ay * t * t;
+        // Always use the snake's angle for projection
+        if (Math.abs(omega1) < 0.01 && Math.abs(alpha) < 0.01) {
+          // Straight projection from head front
+          projectedX = headFront.x + Math.cos(current.angle) * currentSpeed * t;
+          projectedY = headFront.y + Math.sin(current.angle) * currentSpeed * t;
         } else {
-          // Turning movement - use circular arc projection
-          const turnRadius = currentSpeed / Math.abs(omega1);
-          const arcLength = currentSpeed * t;
+          // Turning: project an arc from head front
+          const turnRadius = currentSpeed / (Math.abs(omega1) || 0.0001);
+          const sign = omega1 >= 0 ? 1 : -1;
+          const centerX = headFront.x - sign * turnRadius * Math.sin(current.angle);
+          const centerY = headFront.y + sign * turnRadius * Math.cos(current.angle);
           const angleChange = omega1 * t + 0.5 * alpha * t * t;
-          
-          // Calculate arc center
-          const centerX = current.x - turnRadius * Math.sin(currentDirection);
-          const centerY = current.y + turnRadius * Math.cos(currentDirection);
-          
-          // Calculate projected position on arc
-          const newAngle = currentDirection + angleChange;
-          projectedX = centerX + turnRadius * Math.sin(newAngle);
-          projectedY = centerY - turnRadius * Math.cos(newAngle);
+          const newAngle = current.angle + angleChange;
+          projectedX = centerX + sign * turnRadius * Math.sin(newAngle);
+          projectedY = centerY - sign * turnRadius * Math.cos(newAngle);
         }
-
         this.projectedTrajectoryPoints.push({
           x: projectedX,
           y: projectedY,
