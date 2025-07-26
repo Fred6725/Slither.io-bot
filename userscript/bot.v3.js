@@ -234,10 +234,10 @@ The MIT License (MIT)
     boostSpeedThreshold = 6.5;
 
     // Turn Radius Calibration Constants (ADJUST THESE!)
-    turnRadiusBase = 50;           // Base turn radius in pixels
+    turnRadiusBase = 45;           // Base turn radius in pixels
     lengthMultiplier = 0.05;         // How much snake length affects turning (0.5-2.0)
     speedMultiplier = 1.2;          // How much speed affects turning (0.8-2.0)
-    boostTurnPenalty = 0.756;         // Turn radius multiplier when boosting (1.5-4.0)
+    boostTurnPenalty = 0.84;         // Turn radius multiplier when boosting (1.5-4.0)
     massMultiplier = 0.3;           // How much snake mass affects turning (0.1-1.0)
 
     // Turn visualization settings
