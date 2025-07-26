@@ -619,32 +619,7 @@ The MIT License (MIT)
     // Phase 3: Combat Decision Engine  
     // =====================================
 
-    // Check if this is a valid head-to-head combat situation (not attacking body)
-    isHeadToHeadCombat(mySnake, enemySnake, distance) {
-      // Only engage if:
-      // 1. Close range combat (heads approaching each other)
-      // 2. Both snakes moving towards each other
-      // 3. Not attacking from behind or sides into body
-      
-      const myHeadAngle = mySnake.ang;
-      const enemyHeadAngle = enemySnake.ang;
-      
-      // Calculate angle from my head to enemy head
-      const angleToEnemy = fastAtan2(enemySnake.yy - mySnake.yy, enemySnake.xx - mySnake.xx);
-      const angleFromEnemy = fastAtan2(mySnake.yy - enemySnake.yy, mySnake.xx - enemySnake.xx);
-      
-      // Check if I'm heading towards enemy head (not body)
-      const myHeadingDiff = Math.abs(this.angleDifference(myHeadAngle, angleToEnemy));
-      
-      // Check if enemy is heading towards me
-      const enemyHeadingDiff = Math.abs(this.angleDifference(enemyHeadAngle, angleFromEnemy));
-      
-      // Only engage in head-to-head combat scenarios
-      const isHeadToHead = myHeadingDiff < Math.PI / 3 && enemyHeadingDiff < Math.PI / 3; // Both within 60°
-      const isCloseRange = distance < 400; // Close enough for head-to-head
-      
-      return isHeadToHead && isCloseRange;
-    }
+    // Combat method removed
 
     // Evaluate overall combat situation
     evaluateCombatSituation(mySnake, allSnakes, headPos, headAngle, snakeRadius) {
