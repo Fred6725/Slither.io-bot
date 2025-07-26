@@ -619,10 +619,10 @@ The MIT License (MIT)
     // Phase 3: Combat Decision Engine  
     // =====================================
 
-    // Combat method removed
+    // Combat methods removed (first section)
 
-    // Evaluate overall combat situation
-    evaluateCombatSituation(mySnake, allSnakes, headPos, headAngle, snakeRadius) {
+    // Simple reactive collision detection - no prediction needed (placeholder)
+    detectReactiveCollisions(headPos, headAngle, snakeRadius, snakeSpeed, snakes, borderSize) {
       const combatRange = 600; // Reduced range for more focused combat
       const nearbyEnemies = [];
       
